@@ -61,13 +61,14 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
     }
   };
 
-  const filteredMaterials = materials.filter((m) => {
-    const q = searchQuery.toLowerCase();
+  const filteredMaterials = (materials || []).filter((m) => {
+    if (!m) return false;
+    const q = (searchQuery || '').toLowerCase();
     return (
-      m.name.toLowerCase().includes(q) ||
-      m.code.toLowerCase().includes(q) ||
-      m.supplier.toLowerCase().includes(q) ||
-      m.category.toLowerCase().includes(q)
+      (m.name || '').toLowerCase().includes(q) ||
+      (m.code || '').toLowerCase().includes(q) ||
+      (m.supplier || '').toLowerCase().includes(q) ||
+      (m.category || '').toLowerCase().includes(q)
     );
   });
 
@@ -141,12 +142,12 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
               {filteredMaterials.map((m) => {
-                const isLow = m.currentStock <= m.minimumStock;
+                const isLow = (m.currentStock ?? 0) <= (m.minimumStock ?? 0);
                 return (
                   <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-slate-900">{m.name}</td>
-                    <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">{m.code}</td>
-                    <td className="py-3.5 px-4 capitalize text-slate-600">{m.category}</td>
+                    <td className="py-3.5 px-4 font-bold text-slate-900">{m.name || '-'}</td>
+                    <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">{m.code || '-'}</td>
+                    <td className="py-3.5 px-4 capitalize text-slate-600">{m.category || '-'}</td>
                     <td className="py-3.5 px-4 font-bold text-slate-900">
                       {(() => {
                         const stock = getStockInBothUnits(m);
@@ -164,11 +165,11 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
                       })()}
                     </td>
                     <td className="py-3.5 px-4 text-slate-500">
-                      {m.minimumStock.toLocaleString()} {m.baseUnit}
+                      {(m.minimumStock ?? 0).toLocaleString()} {m.baseUnit || m.unit || ''}
                     </td>
-                    <td className="py-3.5 px-4 font-semibold text-slate-900">₹{m.unitCost.toFixed(2)}</td>
-                    <td className="py-3.5 px-4 text-slate-600">{m.baseUnit}</td>
-                    <td className="py-3.5 px-4 text-slate-600">{m.supplier}</td>
+                    <td className="py-3.5 px-4 font-semibold text-slate-900">₹{(m.unitCost ?? 0).toFixed(2)}</td>
+                    <td className="py-3.5 px-4 text-slate-600">{m.baseUnit || m.unit || 'kg'}</td>
+                    <td className="py-3.5 px-4 text-slate-600">{m.supplier || '-'}</td>
                     <td className="py-3.5 px-4">
                       <Badge status={isLow ? 'low_stock' : 'healthy'} />
                     </td>
@@ -227,7 +228,7 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {usageLogs.length === 0 ? (
+              {!usageLogs || usageLogs.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-8 text-center text-slate-400">
                     {t('No material usage recorded yet.')}
@@ -236,34 +237,34 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
               ) : (
                 usageLogs.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 text-slate-500">{u.date}</td>
-                    <td className="py-3 px-4 font-bold text-slate-900">{u.materialName}</td>
+                    <td className="py-3 px-4 text-slate-500">{u.date || '-'}</td>
+                    <td className="py-3 px-4 font-bold text-slate-900">{u.materialName || '-'}</td>
                     <td className="py-3 px-4 font-bold text-amber-600">
-                      -{u.quantity.toLocaleString()} {u.unit}
+                      -{(u.quantity ?? 0).toLocaleString()} {u.unit || ''}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
-                      {u.wastage1 && u.wastage1 > 0 ? (
+                      {typeof u.wastage1 === 'number' && u.wastage1 > 0 ? (
                         <span className="text-rose-600">
-                          -{u.wastage1.toLocaleString()} {u.unit}
+                          -{u.wastage1.toLocaleString()} {u.unit || ''}
                         </span>
                       ) : (
                         <span className="text-slate-400">-</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
-                      {u.wastage2 && u.wastage2 > 0 ? (
+                      {typeof u.wastage2 === 'number' && u.wastage2 > 0 ? (
                         <span className="text-rose-600">
-                          -{u.wastage2.toLocaleString()} {u.unit}
+                          -{u.wastage2.toLocaleString()} {u.unit || ''}
                         </span>
                       ) : (
                         <span className="text-slate-400">-</span>
                       )}
                     </td>
                     <td className="py-3 px-4 font-bold text-slate-900">
-                      -{u.totalDeduction ? u.totalDeduction.toLocaleString() : u.quantity.toLocaleString()} {u.unit}
+                      -{typeof u.totalDeduction === 'number' ? u.totalDeduction.toLocaleString() : (u.quantity ?? 0).toLocaleString()} {u.unit || ''}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
-                      {u.baseQuantity && u.baseUnit && u.baseQuantity !== u.quantity ? (
+                      {typeof u.baseQuantity === 'number' && u.baseUnit && u.baseQuantity !== u.quantity ? (
                         <span className="text-blue-600">
                           -{formatQuantityWithUnit(u.baseQuantity, u.baseUnit)}
                         </span>
@@ -272,7 +273,7 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
-                      {u.equivalentPieces && u.equivalentPieces > 0 ? (
+                      {typeof u.equivalentPieces === 'number' && u.equivalentPieces > 0 ? (
                         <span className="text-purple-600">
                           {formatQuantityWithUnit(u.equivalentPieces, 'pcs')}
                         </span>

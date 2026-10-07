@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Order, Customer, Settings, Dispatch } from '../types';
-import { getOrders, getCustomers, getSettings, getDispatches, uploadOrderSignedCopy, removeOrderSignedCopy } from '../services/db';
+import { Order, Customer, Settings, Dispatch, Product } from '../types';
+import { getOrders, getCustomers, getSettings, getDispatches, uploadOrderSignedCopy, removeOrderSignedCopy, getProducts } from '../services/db';
 import { Badge } from '../components/common/Badge';
 import { EditOrderItemsModal } from '../components/modals/EditOrderItemsModal';
-import { isPakkaBill, amountInWords, formatInvoiceDate } from '../utils/invoicePrintUtils';
+import { isPakkaBill, amountInWords, formatInvoiceDate, expandComboItems } from '../utils/invoicePrintUtils';
 import { formatPackagingMode } from '../utils/packagingUtils';
 import { formatWeight, getWeightInGrams } from '../utils/weightUtils';
 import { getOrderDeliveryProgress } from '../utils/dispatchUtils';
@@ -41,51 +41,30 @@ interface OrderDetailsProps {
 // Tailwind (which may not render correctly inside @media print).
 const S = {
   page: {
-    fontFamily: "'Segoe UI', Arial, sans-serif",
-    fontSize: '11px',
-    color: '#1a1a2e',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    fontSize: '10px',
+    color: '#0f172a',
     background: '#fff',
     width: '210mm',
     minHeight: '297mm',
     margin: '0 auto',
-    padding: '14mm 16mm 10mm',
+    padding: '12mm 16mm 10mm',
     boxSizing: 'border-box' as const,
   },
   headerCell: { verticalAlign: 'top' as const },
-  brandBox: {
-    display: 'inline-block',
-    background: 'linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)',
-    borderRadius: '8px',
-    padding: '10px 18px',
-    marginBottom: '6px',
-  },
-  brandTitle: { color: '#fff', fontWeight: '900' as const, fontSize: '18px', letterSpacing: '0.5px', lineHeight: 1.1 },
-  brandSub: { color: '#bfdbfe', fontWeight: '600' as const, fontSize: '9px', letterSpacing: '2px', marginTop: '2px' },
-  companyMeta: { fontSize: '9px', color: '#475569', lineHeight: 1.6, marginTop: '4px' },
-  invoiceBox: {
-    background: '#f0f9ff',
-    border: '2px solid #2563eb',
-    borderRadius: '8px',
-    padding: '10px 16px',
-    display: 'inline-block',
-    minWidth: '180px',
-  },
-  invoiceTitle: { color: '#1e3a8a', fontWeight: '900' as const, fontSize: '18px', letterSpacing: '1px' },
-  divider: { height: '2px', background: 'linear-gradient(90deg,#2563eb 0%,#bfdbfe 100%)', borderRadius: '2px', marginBottom: '10px' },
+  divider: { height: '1px', background: '#e2e8f0', margin: '8px 0 10px 0' },
   infoBox: {
-    background: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: '6px',
-    padding: '8px 12px',
+    padding: '0',
+    marginBottom: '10px',
   },
-  infoLabel: { fontSize: '8px', fontWeight: '800' as const, color: '#94a3b8', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginBottom: '5px' },
+  infoLabel: { fontSize: '8px', fontWeight: '700' as const, color: '#94a3b8', letterSpacing: '1px', textTransform: 'uppercase' as const, marginBottom: '2px' },
   thBase: {
-    color: '#fff',
+    color: '#475569',
     fontWeight: '700' as const,
-    fontSize: '9px',
-    letterSpacing: '0.8px',
+    fontSize: '8.5px',
+    letterSpacing: '0.5px',
     textTransform: 'uppercase' as const,
-    padding: '8px 10px',
+    padding: '6px 8px',
   },
   footer: {
     borderTop: '1px solid #e2e8f0',
@@ -108,24 +87,44 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [signedCopyFile, setSignedCopyFile] = useState<File | null>(null);
   const [signedCopyLoading, setSignedCopyLoading] = useState(false);
   const [signedCopyError, setSignedCopyError] = useState('');
+  const [showInvoice, setShowInvoice] = useState(false);
 
   useEffect(() => {
     loadOrder();
   }, [orderId]);
 
+  // Hide invoice after printing
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setShowInvoice(false);
+    };
+
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
+
+  // Hide invoice when navigating away
+  useEffect(() => {
+    return () => {
+      setShowInvoice(false);
+    };
+  }, []);
+
   const loadOrder = async () => {
     setLoading(true);
     try {
-      const [list, cusList, stg, dList] = await Promise.all([
+      const [list, cusList, stg, dList, prdList] = await Promise.all([
         getOrders(),
         getCustomers(),
         getSettings(),
-        getDispatches()
+        getDispatches(),
+        getProducts()
       ]);
       const found = list.find((o) => o.id === orderId || o.orderNumber === orderId);
       if (found) {
@@ -135,6 +134,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
       }
       setSettings(stg);
       setDispatches(dList);
+      setProducts(prdList);
     } catch (e) {
       console.error(e);
     } finally {
@@ -217,24 +217,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
 
   const isCashMemo = !isAS && order.paymentType === 'cash_memo';
   const memoLabel = isAS ? 'AS ORDER' : (isCashMemo ? 'CASH MEMO' : 'DEBIT MEMO');
-  const memoColor = isAS ? '#7e22ce' : (isCashMemo ? '#16a34a' : '#2563eb');
-  const memoBg = isAS ? '#f3e8ff' : (isCashMemo ? '#dcfce7' : '#dbeafe');
-
-  const titleText = isAS ? 'AS ORDER' : (isGst ? 'TAX INVOICE' : 'KACHHA BILL');
-  const headerThemeGradient = isAS
-    ? 'linear-gradient(135deg,#581c87 0%,#7e22ce 100%)'
-    : isGst
-    ? 'linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)'
-    : 'linear-gradient(135deg,#334155 0%,#475569 100%)';
-  const boxBorderColor = isAS ? '#7e22ce' : isGst ? '#2563eb' : '#64748b';
-  const boxBgColor = isAS ? '#faf5ff' : isGst ? '#f0f9ff' : '#f8fafc';
-  const boxTitleColor = isAS ? '#581c87' : isGst ? '#1e3a8a' : '#334155';
-  const dividerGradient = isAS
-    ? 'linear-gradient(90deg,#7e22ce 0%,#e9d5ff 100%)'
-    : isGst
-    ? 'linear-gradient(90deg,#2563eb 0%,#bfdbfe 100%)'
-    : 'linear-gradient(90deg,#64748b 0%,#cbd5e1 100%)';
-  const tableHeaderBg = isAS ? '#581c87' : isGst ? '#1e3a8a' : '#334155';
+  const titleText = isAS ? 'NON-COMMERCIAL ORDER' : (isGst ? 'TAX INVOICE' : 'KACHHA BILL');
   const totalPieces = order.items.reduce((sum, it) => sum + (it.quantity || 0), 0);
   const orderTotalWeightGrams =
     order.totalWeightGrams ??
@@ -256,252 +239,193 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
 
       {/* ═══════════════════════════════════════════════════════════════════
           PRINT-ONLY PROFESSIONAL A4 INVOICE (PAKKA OR KACHHA BILL / AS ORDER)
-          Hidden on screen via `display:none`.
+          Hidden on screen by default, shown only when user clicks Print Invoice
           The @media print rule in index.css flips visibility:
             – hides  #angel-erp-screen
             – shows  #angel-print-invoice
           All styles are inline for print reliability.
       ═══════════════════════════════════════════════════════════════════ */}
+      {showInvoice && (
       <div id="angel-print-invoice">
         <div style={S.page}>
 
           {/* ── HEADER ─────────────────────────────────────────────────── */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }}>
             <tbody>
               <tr>
-                {/* LEFT: Branding */}
+                {/* LEFT: Company Branding */}
                 <td style={{ ...S.headerCell, width: '55%' }}>
-                  <div style={{ ...S.brandBox, background: headerThemeGradient }}>
-                    <div style={S.brandTitle}>🐾 {companyName.toUpperCase()}</div>
-                    <div style={S.brandSub}>PACKAGING SOLUTIONS</div>
-                  </div>
-                  <div style={S.companyMeta}>
-                    <div>{companyAddress}</div>
-                    <div>📞 {companyPhone} &nbsp;|&nbsp; ✉ {companyEmail}</div>
-                    {isGst && companyGstin && (
-                      <div style={{ marginTop: '2px' }}>
-                        <strong style={{ color: '#1e40af' }}>GSTIN:</strong>&nbsp;{companyGstin}
+                  {isGst ? (
+                    <>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.3px', lineHeight: 1.2 }}>
+                        {companyName}
                       </div>
-                    )}
-                  </div>
+                      <div style={{ fontSize: '8.5px', fontWeight: 700, color: '#64748b', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '1px' }}>
+                        PACKAGING SOLUTIONS
+                      </div>
+                      <div style={{ fontSize: '9px', color: '#475569', lineHeight: 1.5, marginTop: '4px' }}>
+                        <div>{companyAddress}</div>
+                        <div>Tel: {companyPhone} &nbsp;|&nbsp; Email: {companyEmail}</div>
+                        {companyGstin && (
+                          <div style={{ fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
+                            GSTIN: {companyGstin}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#475569' }}>
+                      Delivery Estimate / Kachha Bill
+                    </div>
+                  )}
                 </td>
 
-                {/* RIGHT: Invoice meta box */}
-                <td style={{ ...S.headerCell, textAlign: 'right' }}>
-                  <div style={{ ...S.invoiceBox, background: boxBgColor, borderColor: boxBorderColor, minWidth: '190px' }}>
-                    <div style={{ ...S.invoiceTitle, color: boxTitleColor, textAlign: 'center', fontSize: '16px' }}>{titleText}</div>
-                    <div style={{ textAlign: 'center', marginTop: '3px' }}>
-                      <span style={{ display: 'inline-block', background: memoBg, color: memoColor, fontWeight: 800, fontSize: '9px', padding: '2px 8px', borderRadius: '4px', letterSpacing: '1px' }}>
-                        {memoLabel}
-                      </span>
-                    </div>
-                    <div style={{ marginTop: '6px', borderTop: '1px solid #cbd5e1', paddingTop: '6px' }}>
-                      <table style={{ width: '100%', fontSize: '9.5px', borderCollapse: 'collapse' }}>
-                        <tbody>
-                          <tr>
-                            <td style={{ color: '#64748b', paddingBottom: '2px' }}>{isAS ? 'Order No.' : isGst ? 'Invoice No.' : 'Bill No.'}</td>
-                            <td style={{ fontWeight: '800', color: boxTitleColor, textAlign: 'right' }}>{order.orderNumber}</td>
-                          </tr>
-                          <tr>
-                            <td style={{ color: '#64748b', paddingBottom: '2px' }}>Doc Type</td>
-                            <td style={{ fontWeight: '800', color: memoColor, textAlign: 'right' }}>{memoLabel}</td>
-                          </tr>
-                          <tr>
-                            <td style={{ color: '#64748b' }}>Date</td>
-                            <td style={{ fontWeight: '700', textAlign: 'right' }}>{formatInvoiceDate(order.orderDate)}</td>
-                          </tr>
-                          <tr>
-                            <td style={{ color: '#64748b', paddingTop: '2px' }}>Status</td>
-                            <td style={{
-                              fontWeight: '700', textAlign: 'right', textTransform: 'capitalize',
-                              color: order.orderStatus === 'completed' ? '#16a34a'
-                                : order.orderStatus === 'cancelled' ? '#dc2626' : '#d97706'
-                            }}>
-                              {order.orderStatus}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
+                {/* RIGHT: Invoice Title & Meta Details */}
+                <td style={{ ...S.headerCell, width: '45%', textAlign: 'right' }}>
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                    {titleText}
+                  </div>
+                  <div style={{ marginTop: '2px' }}>
+                    <span style={{ display: 'inline-block', background: '#f1f5f9', color: '#334155', fontSize: '8.5px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', letterSpacing: '0.5px' }}>
+                      {memoLabel}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: '6px', display: 'inline-block', textAlign: 'right' }}>
+                    <table style={{ fontSize: '9.5px', borderCollapse: 'collapse', marginLeft: 'auto' }}>
+                      <tbody>
+                        <tr>
+                          <td style={{ color: '#64748b', padding: '1.5px 6px 1.5px 0', textAlign: 'right' }}>
+                            {isAS ? 'Order No:' : isGst ? 'Invoice No:' : 'Bill No:'}
+                          </td>
+                          <td style={{ fontWeight: 700, color: '#0f172a', padding: '1.5px 0', textAlign: 'right' }}>
+                            {order.orderNumber}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ color: '#64748b', padding: '1.5px 6px 1.5px 0', textAlign: 'right' }}>Date:</td>
+                          <td style={{ fontWeight: 600, color: '#0f172a', padding: '1.5px 0', textAlign: 'right' }}>
+                            {formatInvoiceDate(order.orderDate)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ color: '#64748b', padding: '1.5px 6px 1.5px 0', textAlign: 'right' }}>Status:</td>
+                          <td style={{ fontWeight: 600, textTransform: 'capitalize', color: '#334155', padding: '1.5px 0', textAlign: 'right' }}>
+                            {order.orderStatus}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
 
-          {/* Gradient divider */}
-          <div style={{ ...S.divider, background: dividerGradient }} />
+          {/* Simple clean divider */}
+          <div style={S.divider} />
 
-          {/* ── BILL-TO + PAYMENT SUMMARY ──────────────────────────────── */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
-            <tbody>
-              <tr>
-                <td style={{ width: '50%', verticalAlign: 'top', paddingRight: '8px' }}>
-                  <div style={S.infoBox}>
-                    <div style={S.infoLabel}>{isGst ? 'Bill To' : 'Customer Details'}</div>
-                    <div style={{ fontWeight: '800', fontSize: '13px', color: '#0f172a', marginBottom: '2px' }}>
-                      {order.companyName}
-                    </div>
-                    <div style={{ color: '#475569', fontSize: '10px' }}>Attn: {order.customerName}</div>
-                    {isGst && customerGstin && (
-                      <div style={{ color: '#1e40af', fontSize: '9.5px', marginTop: '2px', fontWeight: '600' }}>
-                        GSTIN: {customerGstin}
-                      </div>
-                    )}
-                  </div>
-                </td>
-                <td style={{ width: '50%', verticalAlign: 'top', paddingLeft: '8px' }}>
-                  <div style={S.infoBox}>
-                    <div style={S.infoLabel}>{isAS ? 'Order Classification' : 'Payment Summary'}</div>
-                    {isAS ? (
-                      <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse' }}>
-                        <tbody>
-                          <tr>
-                            <td style={{ color: '#475569', paddingBottom: '2px' }}>Order Type:</td>
-                            <td style={{ textAlign: 'right', fontWeight: '800', color: '#7e22ce' }}>AS Order</td>
-                          </tr>
-                          <tr>
-                            <td style={{ color: '#475569', paddingBottom: '2px' }}>Financial Impact:</td>
-                            <td style={{ textAlign: 'right', fontWeight: '700', color: '#16a34a' }}>None (₹0)</td>
-                          </tr>
-                          <tr style={{ borderTop: '1px solid #e2e8f0' }}>
-                            <td style={{ color: '#0f172a', fontWeight: '700', paddingTop: '3px' }}>Inventory Impact:</td>
-                            <td style={{ textAlign: 'right', fontWeight: '700', color: '#64748b', paddingTop: '3px' }}>None</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    ) : (
-                      <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse' }}>
-                        <tbody>
-                          <tr>
-                            <td style={{ color: '#475569', paddingBottom: '2px' }}>Payment Status:</td>
-                            <td style={{
-                              textAlign: 'right', fontWeight: '700', textTransform: 'capitalize',
-                              color: order.paymentStatus === 'paid' ? '#16a34a'
-                                : order.paymentStatus === 'partially_paid' ? '#d97706' : '#dc2626'
-                            }}>
-                              {order.paymentStatus === 'partially_paid' ? 'Partially Paid'
-                                : order.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td style={{ color: '#475569', paddingBottom: '2px' }}>Amount Paid:</td>
-                            <td style={{ textAlign: 'right', fontWeight: '700', color: '#16a34a' }}>
-                              ₹{order.paidAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                          <tr style={{ borderTop: '1px solid #e2e8f0' }}>
-                            <td style={{ color: '#0f172a', fontWeight: '700', paddingTop: '3px' }}>Balance Due:</td>
-                            <td style={{
-                              textAlign: 'right', fontWeight: '800', paddingTop: '3px',
-                              color: pendingBalance > 0 ? '#dc2626' : '#16a34a'
-                            }}>
-                              ₹{pendingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {/* ── BILL-TO ──────────────────────────────────────────────────────── */}
+          <div style={S.infoBox}>
+            <div style={S.infoLabel}>{isGst ? 'Bill To' : 'Customer Details'}</div>
+            <div style={{ fontWeight: 700, fontSize: '12px', color: '#0f172a' }}>
+              {order.companyName}
+            </div>
+            <div style={{ color: '#475569', fontSize: '9.5px', marginTop: '1px' }}>Attn: {order.customerName}</div>
+            {isGst && customerGstin && (
+              <div style={{ color: '#0f172a', fontSize: '9.5px', marginTop: '2px', fontWeight: 600 }}>
+                GSTIN: {customerGstin}
+              </div>
+            )}
+          </div>
 
           {/* ── ITEMS TABLE ────────────────────────────────────────────── */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
             <thead>
-              <tr style={{ background: tableHeaderBg }}>
+              <tr style={{ background: '#f8fafc', borderTop: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1' }}>
                 <th style={{ ...S.thBase, textAlign: 'left', width: '4%' }}>#</th>
                 <th style={{ ...S.thBase, textAlign: 'left' }}>Description / Product</th>
                 <th style={{ ...S.thBase, textAlign: 'center', width: '9%' }}>Type</th>
-                <th style={{ ...S.thBase, textAlign: 'center', width: '11%' }}>Qty</th>
-                <th style={{ ...S.thBase, textAlign: 'right', width: '13%' }}>Unit Rate (₹)</th>
+                <th style={{ ...S.thBase, textAlign: 'center', width: '12%' }}>Qty</th>
+                <th style={{ ...S.thBase, textAlign: 'right', width: '12%' }}>Unit Rate (₹)</th>
                 {hasAnyWeightInOrder && (
-                  <th style={{ ...S.thBase, textAlign: 'center', width: '12%' }}>Weight</th>
+                  <th style={{ ...S.thBase, textAlign: 'center', width: '11%' }}>Weight</th>
                 )}
                 <th style={{ ...S.thBase, textAlign: 'right', width: '14%' }}>{isGst ? 'Taxable Amount (₹)' : 'Amount (₹)'}</th>
               </tr>
             </thead>
             <tbody>
-              {order.items.map((item, idx) => {
-                const hasInner = Boolean(item.selectedInnerName || item.selectedInnerId);
-                const hasCap = Boolean(item.selectedCapName || item.selectedCapId);
-                const isCombo = Boolean(item.isCombo || hasInner || hasCap);
-
-                let displayTitle = item.productName;
-                if (hasInner && hasCap) {
-                  displayTitle = `${item.productName} + ${item.selectedInnerName || 'Inner'} + ${item.selectedCapName || 'Cap'}`;
-                } else if (hasCap) {
-                  displayTitle = `${item.productName} + ${item.selectedCapName || 'Cap'}`;
-                } else if (hasInner) {
-                  displayTitle = `${item.productName} + ${item.selectedInnerName || 'Inner'}`;
-                }
-
-                const pieceGrams = getWeightInGrams(item.weightPerPiece, item.weightUnit || 'g') || 0;
-                const itemWeightStr =
-                  item.totalWeightDisplay ||
-                  (pieceGrams > 0 ? formatWeight(pieceGrams * item.quantity) : '-');
+              {expandComboItems(order.items, products).map((expandedItem, idx) => {
+                const { item, quantity, unitPrice, subtotal, isComponent, componentType, weightDisplay } = expandedItem;
+                const isCombo = Boolean(item.isCombo);
 
                 return (
-                <tr key={idx} style={{ background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: '600' }}>
+                <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '6px 8px', color: '#64748b', fontSize: '9.5px', verticalAlign: 'middle' }}>
                     {idx + 1}
                   </td>
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', fontWeight: '700', color: '#0f172a' }}>
-                    {displayTitle}
-                    {isCombo && (
-                      <span style={{ fontSize: '8px', background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: '4px', fontWeight: '700', marginLeft: '6px', textTransform: 'uppercase' }}>
-                        Combo
-                      </span>
-                    )}
-                    {item.isAutoGenerated && (
-                      <span style={{ fontSize: '8px', background: '#e0f2fe', color: '#0284c7', padding: '1px 5px', borderRadius: '4px', fontWeight: '700', marginLeft: '6px', textTransform: 'uppercase' }}>
-                        Auto Linked
-                      </span>
-                    )}
-                    {isCombo && (hasInner || hasCap) && (
-                      <div style={{ fontSize: '8.5px', color: '#475569', fontWeight: '500', marginTop: '2px' }}>
-                        Included: {hasInner ? `${item.selectedInnerName || 'Inner'} × ${item.quantity.toLocaleString('en-IN')}` : ''}{hasInner && hasCap ? ' • ' : ''}{hasCap ? `${item.selectedCapName || 'Cap'} × ${item.quantity.toLocaleString('en-IN')}` : ''}
-                      </div>
-                    )}
-                    {item.packagingMode && item.packagingMode !== 'bottle_only' && !isCombo && (
-                      <div style={{ fontSize: '8.5px', color: '#2563eb', fontWeight: '700', marginTop: '1.5px' }}>
+                  <td style={{ padding: '6px 8px', color: '#0f172a', fontWeight: 600, fontSize: '10px', verticalAlign: 'middle' }}>
+                    <div>
+                      {expandedItem.displayTitle}
+                      {isComponent && (
+                        <span style={{
+                          fontSize: '8px',
+                          background: componentType === 'inner' ? '#fdf2f8' : '#fffbeb',
+                          color: componentType === 'inner' ? '#be185d' : '#b45309',
+                          border: '1px solid #f1f5f9',
+                          padding: '1px 4px',
+                          borderRadius: '3px',
+                          fontWeight: 700,
+                          marginLeft: '5px',
+                          textTransform: 'uppercase'
+                        }}>
+                          {componentType === 'inner' ? 'Inner' : 'Cap'}
+                        </span>
+                      )}
+                      {!isComponent && isCombo && (
+                        <span style={{ fontSize: '8px', background: '#eff6ff', color: '#1e40af', border: '1px solid #dbeafe', padding: '1px 4px', borderRadius: '3px', fontWeight: 700, marginLeft: '5px', textTransform: 'uppercase' }}>
+                          Combo
+                        </span>
+                      )}
+                      {item.isAutoGenerated && (
+                        <span style={{ fontSize: '8px', background: '#f0fdf4', color: '#15803d', border: '1px solid #dcfce7', padding: '1px 4px', borderRadius: '3px', fontWeight: 700, marginLeft: '5px', textTransform: 'uppercase' }}>
+                          Auto Linked
+                        </span>
+                      )}
+                    </div>
+                    {item.packagingMode && item.packagingMode !== 'bottle_only' && !isCombo && !isComponent && (
+                      <div style={{ fontSize: '8.5px', color: '#2563eb', fontWeight: 600, marginTop: '2px' }}>
                         Packaging: {formatPackagingMode(item.packagingMode)}
                       </div>
                     )}
-                    <div style={{ fontSize: '9px', color: '#94a3b8', fontWeight: '400', marginTop: '1px' }}>
+                    <div style={{ fontSize: '8px', color: '#94a3b8', fontWeight: 400, marginTop: '1px' }}>
                       Category {item.priceCategory} Pricing
                     </div>
                   </td>
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', color: '#475569', fontWeight: '600', textTransform: 'capitalize' }}>
+                  <td style={{ padding: '6px 8px', textAlign: 'center', color: '#475569', fontSize: '9.5px', textTransform: 'capitalize', verticalAlign: 'middle' }}>
                     {item.productType}
                   </td>
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: '700', color: '#0f172a' }}>
-                    {item.soldByPacket && item.packetCount && item.unitsPerPacket ? (
+                  <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: '#0f172a', fontSize: '9.5px', verticalAlign: 'middle' }}>
+                    {item.soldByPacket && item.packetCount && item.unitsPerPacket && !isComponent ? (
                       <div>
                         <div>{item.packetCount.toLocaleString('en-IN')} Packets</div>
-                        <div style={{ fontSize: '8.5px', color: '#64748b', fontWeight: '500', marginTop: '2px' }}>
-                          Units per Packet: {item.unitsPerPacket.toLocaleString('en-IN')}
-                        </div>
-                        <div style={{ fontSize: '8.5px', color: '#64748b', fontWeight: '500' }}>
-                          Total Units: {item.quantity.toLocaleString('en-IN')}
+                        <div style={{ fontSize: '8px', color: '#64748b', fontWeight: 500, marginTop: '1px' }}>
+                          ({item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt &bull; Total: {quantity.toLocaleString('en-IN')} pcs)
                         </div>
                       </div>
                     ) : (
-                      `${item.quantity.toLocaleString('en-IN')} pcs`
+                      `${quantity.toLocaleString('en-IN')} pcs`
                     )}
                   </td>
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'right', color: '#0f172a', fontWeight: '600' }}>
-                    {item.unitPrice.toFixed(2)}
+                  <td style={{ padding: '6px 8px', textAlign: 'right', color: '#0f172a', fontSize: '9.5px', verticalAlign: 'middle' }}>
+                    {isComponent ? '-' : `₹${unitPrice.toFixed(2)}`}
                   </td>
                   {hasAnyWeightInOrder && (
-                    <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: '700', color: '#0f172a' }}>
-                      {itemWeightStr}
+                    <td style={{ padding: '6px 8px', textAlign: 'center', color: '#475569', fontSize: '9.5px', verticalAlign: 'middle' }}>
+                      {weightDisplay || '-'}
                     </td>
                   )}
-                  <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                    {item.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#0f172a', fontSize: '9.5px', verticalAlign: 'middle' }}>
+                    {isComponent ? '-' : `₹${subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   </td>
                 </tr>
                 );
@@ -510,82 +434,82 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
           </table>
 
           {/* ── TOTALS & SUMMARY ────────────────────────────────────────── */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
             <tbody>
               <tr>
-                {/* Left: notes & logistics */}
-                <td style={{ verticalAlign: 'top', paddingRight: '12px', width: '48%' }}>
-                  <div style={{
-                    background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px',
-                    padding: '7px 10px', fontSize: '9.5px', color: '#334155', marginBottom: '6px'
-                  }}>
-                    <div><strong>TOTAL QUANTITY:</strong> {totalPieces.toLocaleString('en-IN')} pcs</div>
+                {/* Left: notes, logistics & terms */}
+                <td style={{ verticalAlign: 'top', width: '50%', paddingRight: '16px' }}>
+                  <div style={{ fontSize: '9px', color: '#475569', lineHeight: 1.5, marginBottom: '6px' }}>
+                    <div><strong>Total Quantity:</strong> {totalPieces.toLocaleString('en-IN')} pcs</div>
                     {hasAnyWeightInOrder && totalOrderWeightDisplay && (
-                      <div style={{ marginTop: '2px' }}>
-                        <strong>TOTAL WEIGHT:</strong> <span style={{ color: '#0f172a', fontWeight: '800' }}>{totalOrderWeightDisplay}</span>
+                      <div style={{ marginTop: '1px' }}>
+                        <strong>Total Weight:</strong> {totalOrderWeightDisplay}
                       </div>
                     )}
                   </div>
                   {order.notes && (
-                    <div style={{
-                      background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px',
-                      padding: '8px 10px', fontSize: '9.5px', color: '#78350f'
-                    }}>
+                    <div style={{ background: '#f8fafc', borderLeft: '3px solid #cbd5e1', padding: '5px 8px', fontSize: '8.5px', color: '#475569', marginBottom: '6px' }}>
                       <strong>Note:</strong> {order.notes}
                     </div>
                   )}
+                  <div style={{ fontSize: '8px', color: '#64748b', lineHeight: 1.4, marginTop: '6px' }}>
+                    <div style={{ fontWeight: 700, color: '#475569', marginBottom: '2px' }}>Terms &amp; Conditions:</div>
+                    <div>1. Goods once sold will not be taken back.</div>
+                    <div>2. Payment is due within 30 days of invoice date.</div>
+                    <div>3. All disputes subject to Vadodara jurisdiction only.</div>
+                  </div>
                 </td>
 
                 {/* Right: calculation summary */}
-                <td style={{ verticalAlign: 'top', width: '52%' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px' }}>
+                <td style={{ verticalAlign: 'top', width: '50%' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
                     <tbody>
                       <tr>
-                        <td style={{ padding: '4px 10px', color: '#475569' }}>{isGst ? 'Subtotal (Taxable):' : 'Subtotal:'}</td>
-                        <td style={{ padding: '4px 10px', textAlign: 'right', fontWeight: '600', color: '#0f172a' }}>
-                          ₹{order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '3px 6px', color: '#475569' }}>{isGst ? 'Subtotal (Taxable):' : 'Subtotal:'}</td>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>
+                          ₹{order.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                       {isGst && order.gstRate > 0 && order.gstAmount > 0 && (
                         <>
                           <tr>
-                            <td style={{ padding: '4px 10px', color: '#475569' }}>
+                            <td style={{ padding: '3px 6px', color: '#475569' }}>
                               CGST ({order.gstRate / 2}%):
                             </td>
-                            <td style={{ padding: '4px 10px', textAlign: 'right', fontWeight: '600', color: '#0f172a' }}>
-                              ₹{(order.gstAmount / 2).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>
+                              ₹{(order.gstAmount / 2).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
                           <tr>
-                            <td style={{ padding: '4px 10px', color: '#475569' }}>
+                            <td style={{ padding: '3px 6px', color: '#475569' }}>
                               SGST ({order.gstRate / 2}%):
                             </td>
-                            <td style={{ padding: '4px 10px', textAlign: 'right', fontWeight: '600', color: '#0f172a' }}>
-                              ₹{(order.gstAmount / 2).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>
+                              ₹{(order.gstAmount / 2).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
                         </>
                       )}
-                      <tr style={{ background: tableHeaderBg }}>
-                        <td style={{ padding: '7px 10px', color: '#fff', fontWeight: '800', fontSize: '12px' }}>
-                          GRAND TOTAL:
+                      <tr style={{ borderTop: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1' }}>
+                        <td style={{ padding: '5px 6px', color: '#0f172a', fontWeight: 800, fontSize: '11px' }}>
+                          Grand Total:
                         </td>
-                        <td style={{ padding: '7px 10px', textAlign: 'right', color: '#93c5fd', fontWeight: '900', fontSize: '13px' }}>
-                          ₹{order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '5px 6px', textAlign: 'right', color: '#0f172a', fontWeight: 800, fontSize: '11px' }}>
+                          ₹{order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                       <tr>
-                        <td style={{ padding: '4px 10px', color: '#16a34a', fontWeight: '600' }}>Amount Received:</td>
-                        <td style={{ padding: '4px 10px', textAlign: 'right', fontWeight: '700', color: '#16a34a' }}>
-                          ₹{order.paidAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '3px 6px', color: '#475569' }}>Amount Received:</td>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
+                          ₹{order.paidAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
-                      <tr style={{ borderTop: '2px solid #e2e8f0' }}>
-                        <td style={{ padding: '5px 10px', fontWeight: '700', color: pendingBalance > 0 ? '#dc2626' : '#16a34a' }}>
-                          {pendingBalance > 0 ? 'Balance Outstanding:' : 'Fully Settled ✓'}
+                      <tr>
+                        <td style={{ padding: '3px 6px', fontWeight: 700, color: pendingBalance > 0 ? '#b91c1c' : '#16a34a' }}>
+                          {pendingBalance > 0 ? 'Balance Due:' : 'Fully Settled ✓'}
                         </td>
-                        <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: '800', color: pendingBalance > 0 ? '#dc2626' : '#16a34a' }}>
-                          ₹{pendingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700, color: pendingBalance > 0 ? '#b91c1c' : '#16a34a' }}>
+                          ₹{pendingBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                     </tbody>
@@ -595,44 +519,36 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
             </tbody>
           </table>
 
-          {/* ── AMOUNT IN WORDS BOX (Positioned near bottom, spanning full width) ── */}
+          {/* ── AMOUNT IN WORDS BOX ── */}
           <div style={{
-            background: boxBgColor,
-            border: '1px solid #cbd5e1',
-            borderRadius: '6px',
-            padding: '7px 12px',
-            fontSize: '9.5px',
-            color: boxTitleColor,
-            marginBottom: '8px'
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '4px',
+            padding: '6px 10px',
+            fontSize: '9px',
+            color: '#334155',
+            marginBottom: '10px'
           }}>
-            <span style={{ fontWeight: 800, color: '#64748b', fontSize: '8.5px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <span style={{ fontWeight: 700, color: '#64748b', fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               Amount in Words:{' '}
             </span>
-            <span style={{ fontWeight: 700, color: boxTitleColor, fontSize: '10px' }}>
+            <span style={{ fontWeight: 600, color: '#0f172a' }}>
               {amountInWords(order.totalAmount)}
             </span>
           </div>
 
-          {/* ── TERMS + SIGNATORY ──────────────────────────────────────── */}
-          <div style={{ height: '1px', background: '#e2e8f0', marginBottom: '8px' }} />
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px', marginBottom: '10px' }}>
+          {/* ── SIGNATORY ──────────────────────────────────────── */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px', marginTop: '12px', marginBottom: '8px' }}>
             <tbody>
               <tr>
-                <td style={{ verticalAlign: 'top', width: '55%', paddingRight: '12px', color: '#475569' }}>
-                  <div style={{ fontWeight: '700', color: boxTitleColor, marginBottom: '3px', fontSize: '9.5px' }}>
-                    Terms &amp; Conditions
-                  </div>
-                  <div>1. Goods once sold will not be taken back.</div>
-                  <div>2. Payment is due within 30 days of invoice date.</div>
-                  <div>3. Interest @ 18% p.a. will be charged on overdue payments.</div>
-                  <div>4. All disputes subject to Vadodara jurisdiction only.</div>
-                </td>
-                <td style={{ verticalAlign: 'top', width: '45%', paddingLeft: '12px' }}>
-                  <div style={{ fontWeight: '700', color: boxTitleColor, marginBottom: '3px', fontSize: '9.5px' }}>
+                <td style={{ width: '60%' }}></td>
+                <td style={{ width: '40%', textAlign: 'right' }}>
+                  <div style={{ fontWeight: 600, color: '#0f172a', marginBottom: '24px' }}>
                     For {companyName}
                   </div>
-                  <div style={{ height: '42px', borderBottom: '1px dashed #cbd5e1', marginBottom: '4px' }} />
-                  <div style={{ color: '#64748b' }}>Authorised Signatory</div>
+                  <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '3px', color: '#64748b', fontSize: '8.5px' }}>
+                    Authorised Signatory
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -640,14 +556,14 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
 
           {/* ── FOOTER ─────────────────────────────────────────────────── */}
           <div style={S.footer}>
-            <strong style={{ color: boxTitleColor }}>{companyName}</strong>
-            &nbsp;|&nbsp; {companyAddress}
+            <strong>{companyName}</strong>
             {isGst && companyGstin && <>&nbsp;|&nbsp; GSTIN: {companyGstin}</>}
-            &nbsp;|&nbsp; This is a computer-generated {isGst ? 'tax invoice' : 'kachha bill'}.
+            &nbsp;|&nbsp; This is a computer-generated {isGst ? 'tax invoice' : 'bill'}.
           </div>
 
         </div>
       </div>
+      )}
       {/* ═══════════════════════════════════════════════════════════════════
           END PRINT-ONLY INVOICE
       ═══════════════════════════════════════════════════════════════════ */}
@@ -693,7 +609,14 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => window.print()}
+              onClick={() => {
+                setShowInvoice(true);
+                setTimeout(() => {
+                  window.print();
+                  // Fallback: hide invoice after 5 seconds if afterprint doesn't fire
+                  setTimeout(() => setShowInvoice(false), 5000);
+                }, 100);
+              }}
               className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs rounded-xl shadow-sm transition-colors flex items-center space-x-1.5"
             >
               <Printer className="w-3.5 h-3.5" />
@@ -1032,31 +955,23 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs text-slate-700 font-medium">
-                {order.items.map((item, idx) => {
-                  const hasInner = Boolean(item.selectedInnerName || item.selectedInnerId);
-                  const hasCap = Boolean(item.selectedCapName || item.selectedCapId);
-                  const isCombo = Boolean(item.isCombo || hasInner || hasCap);
-
-                  let displayTitle = item.productName;
-                  if (hasInner && hasCap) {
-                    displayTitle = `${item.productName} + ${item.selectedInnerName || 'Inner'} + ${item.selectedCapName || 'Cap'}`;
-                  } else if (hasCap) {
-                    displayTitle = `${item.productName} + ${item.selectedCapName || 'Cap'}`;
-                  } else if (hasInner) {
-                    displayTitle = `${item.productName} + ${item.selectedInnerName || 'Inner'}`;
-                  }
-
-                  const pieceGrams = getWeightInGrams(item.weightPerPiece, item.weightUnit || 'g') || 0;
-                  const itemWeightStr =
-                    item.totalWeightDisplay ||
-                    (pieceGrams > 0 ? formatWeight(pieceGrams * item.quantity) : '-');
+                {expandComboItems(order.items, products).map((expandedItem, idx) => {
+                  const { item, quantity, unitPrice, subtotal, isComponent, componentType, weightDisplay } = expandedItem;
+                  const isCombo = Boolean(item.isCombo);
 
                   return (
                   <tr key={idx}>
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-slate-900 flex items-center flex-wrap gap-1.5">
-                        <span>{displayTitle}</span>
-                        {isCombo && (
+                        <span>{expandedItem.displayTitle}</span>
+                        {isComponent && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                            componentType === 'inner' ? 'text-pink-700 bg-pink-100/80' : 'text-amber-700 bg-amber-100/80'
+                          }`}>
+                            {componentType === 'inner' ? 'Inner' : 'Cap'}
+                          </span>
+                        )}
+                        {!isComponent && isCombo && (
                           <span className="text-[10px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full uppercase tracking-wider">
                             Combo
                           </span>
@@ -1067,15 +982,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                           </span>
                         )}
                       </div>
-                      {isCombo && (hasInner || hasCap) && (
-                        <div className="text-[11px] font-medium text-slate-500 mt-1 flex flex-wrap gap-2">
-                          <span>Included:</span>
-                          {hasInner && <span className="text-slate-700 font-semibold">{item.selectedInnerName || 'Inner'} × {item.quantity.toLocaleString()}</span>}
-                          {hasInner && hasCap && <span>•</span>}
-                          {hasCap && <span className="text-slate-700 font-semibold">{item.selectedCapName || 'Cap'} × {item.quantity.toLocaleString()}</span>}
-                        </div>
-                      )}
-                      {item.packagingMode && item.packagingMode !== 'bottle_only' && !isCombo && (
+                      {item.packagingMode && item.packagingMode !== 'bottle_only' && !isCombo && !isComponent && (
                         <div className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md inline-flex items-center gap-1 mt-1 border border-blue-100">
                           Packaging: {formatPackagingMode(item.packagingMode)}
                         </div>
@@ -1087,25 +994,25 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                         Category {item.priceCategory}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4">₹{item.unitPrice.toFixed(2)}</td>
+                    <td className="py-3.5 px-4">{isComponent ? '-' : `₹${unitPrice.toFixed(2)}`}</td>
                     <td className="py-3.5 px-4 font-semibold">
-                      {item.soldByPacket && item.packetCount && item.unitsPerPacket ? (
+                      {item.soldByPacket && item.packetCount && item.unitsPerPacket && !isComponent ? (
                         <div className="space-y-0.5">
                           <div>Quantity: {item.packetCount.toLocaleString('en-IN')} Packets</div>
                           <div className="text-[11px] font-medium text-slate-500">
                             Units per Packet: {item.unitsPerPacket.toLocaleString('en-IN')}
                           </div>
                           <div className="text-[11px] font-medium text-slate-500">
-                            Total Units: {item.quantity.toLocaleString('en-IN')}
+                            Total Units: {quantity.toLocaleString('en-IN')} pcs
                           </div>
                         </div>
                       ) : (
-                        item.quantity.toLocaleString()
+                        `${quantity.toLocaleString('en-IN')} pcs`
                       )}
                     </td>
                     {hasAnyWeightInOrder && (
                       <td className="py-3.5 px-4 font-semibold text-slate-900">
-                        <div>{itemWeightStr}</div>
+                        <div>{weightDisplay || '-'}</div>
                         {item.weightPerPiece && (
                           <div className="text-[10px] font-medium text-slate-400">
                             {item.weightPerPiece} {item.weightUnit || 'g'}/pc
@@ -1114,7 +1021,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                       </td>
                     )}
                     <td className="py-3.5 px-4 text-right font-bold text-slate-900">
-                      ₹{item.subtotal.toLocaleString()}
+                      {isComponent ? '-' : `₹${subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </td>
                   </tr>
                   );

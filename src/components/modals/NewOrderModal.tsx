@@ -29,7 +29,7 @@ interface DraftOrderItem {
 const createDraftItem = (productId = '', id = `line-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`): DraftOrderItem => ({
   id,
   productId,
-  quantity: 1000,
+  quantity: '',
   sellByPacket: false,
   packetCount: '',
   selectedInnerId: '',
@@ -47,6 +47,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [orders, setOrders] = useState<Order[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [submittingMode, setSubmittingMode] = useState<'save' | 'save_and_print' | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const loading = submittingMode !== null;
   const [error, setError] = useState('');
 
@@ -282,19 +283,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     const unitsPerPacket = getProductUnitsPerPacket(product);
     if (!enabled || !unitsPerPacket) {
       const current = items.find((item) => item.id === id);
-      const packetCount = current?.packetCount === '' || current?.packetCount == null ? 0 : current.packetCount;
-      const derivedQuantity = current?.sellByPacket && unitsPerPacket
+      const packetCount = typeof current?.packetCount === 'number' && current.packetCount > 0 ? current.packetCount : 0;
+      const derivedQuantity = current?.sellByPacket && unitsPerPacket && packetCount > 0
         ? calculatePacketUnits(packetCount, unitsPerPacket)
-        : (current?.quantity === '' || current?.quantity == null ? 1000 : current.quantity);
-      const finalQty = derivedQuantity || 1000;
-      updateItem(id, { sellByPacket: false, quantity: finalQty });
+        : (current?.quantity ?? '');
+      updateItem(id, { sellByPacket: false, quantity: derivedQuantity });
       return;
     }
     const current = items.find((item) => item.id === id);
-    const currentQty = current?.quantity === '' || current?.quantity == null ? 0 : current.quantity;
+    const currentQty = typeof current?.quantity === 'number' && current.quantity > 0 ? current.quantity : 0;
     const packetCount = currentQty > 0 && currentQty % unitsPerPacket === 0
       ? currentQty / unitsPerPacket
-      : 1;
+      : (current?.packetCount ?? '');
     updateItem(id, { sellByPacket: true, packetCount });
   };
 
@@ -482,8 +482,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         orderType
       });
 
+      // Save completed successfully
+      setSubmittingMode(null);
+      setSaveSuccess(true);
+
+      // Show success animation for 500ms
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       if (andPrint) {
-        const printed = printInvoice(createdOrder, printWin, settings, targetCustomer);
+        // Trigger print for the newly created order
+        const printed = printInvoice(createdOrder, printWin, settings, targetCustomer, products);
         if (!printed) {
           console.warn('Popup was blocked by browser for invoice print.');
           alert('Invoice PDF could not be opened automatically. Please allow pop-ups for this site.');
@@ -492,6 +500,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
       if (onOrderCreated) onOrderCreated();
       onClose();
+      setSaveSuccess(false);
     } catch (err) {
       if (printWin && !printWin.closed) {
         try {
@@ -502,7 +511,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       }
       console.error(err);
       setError('Failed to create order. Please try again.');
-    } finally {
       setSubmittingMode(null);
     }
   };
@@ -1268,21 +1276,39 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
           </button>
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || saveSuccess}
             onClick={() => handleSave(false)}
             className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-sm"
           >
-            <Check className="w-4 h-4" />
-            <span>{submittingMode === 'save' ? t('Saving...') : t('Save')}</span>
+            {saveSuccess ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Saved ✓</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                <span>{submittingMode === 'save' ? t('Saving...') : t('Save')}</span>
+              </>
+            )}
           </button>
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || saveSuccess}
             onClick={() => handleSave(true)}
             className="btn-primary"
           >
-            <Printer className="w-4 h-4" />
-            <span>{submittingMode === 'save_and_print' ? t('Saving & Generating PDF...') : t('Save & Print')}</span>
+            {saveSuccess ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Saved ✓</span>
+              </>
+            ) : (
+              <>
+                <Printer className="w-4 h-4" />
+                <span>{submittingMode === 'save_and_print' ? t('Saving...') : t('Save & Print')}</span>
+              </>
+            )}
           </button>
         </div>
       </form>

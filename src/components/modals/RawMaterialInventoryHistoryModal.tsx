@@ -22,16 +22,16 @@ export const RawMaterialInventoryHistoryModal: React.FC<RawMaterialInventoryHist
   const stockDisplay = getStockInBothUnits(material);
 
   // Filter usage logs for this material
-  const materialUsageLogs = usageLogs.filter((log) => log.materialId === material.id);
+  const materialUsageLogs = (usageLogs || []).filter((log) => log && log.materialId === material?.id);
 
   // Filter purchase items for this material
-  const materialPurchases = purchases
+  const materialPurchases = (purchases || [])
     .filter((purchase) => 
-      purchase.items.some((item) => item.rawMaterialId === material.id)
+      purchase && Array.isArray(purchase.items) && purchase.items.some((item) => item && item.rawMaterialId === material?.id)
     )
     .map((purchase) => ({
       ...purchase,
-      item: purchase.items.find((item) => item.rawMaterialId === material.id)
+      item: purchase.items.find((item) => item && item.rawMaterialId === material?.id)
     }))
     .filter((purchase) => purchase.item !== undefined);
 
@@ -39,41 +39,41 @@ export const RawMaterialInventoryHistoryModal: React.FC<RawMaterialInventoryHist
   const allTransactions = [
     ...materialPurchases.map((purchase) => ({
       type: 'purchase' as const,
-      date: purchase.purchaseDate,
-      quantity: purchase.item!.quantity,
-      unit: purchase.item!.unit,
+      date: purchase.purchaseDate || '',
+      quantity: purchase.item!.quantity || 0,
+      unit: purchase.item!.unit || material.baseUnit || 'kg',
       wastage1: undefined,
       wastage2: undefined,
-      totalDeduction: purchase.item!.quantity,
-      convertedQuantity: material.conversionFactor > 0 
-        ? purchase.item!.quantity * material.conversionFactor 
-        : purchase.item!.quantity,
-      convertedUnit: material.baseUnit,
+      totalDeduction: purchase.item!.quantity || 0,
+      convertedQuantity: (material.conversionFactor || 0) > 0 
+        ? (purchase.item!.quantity || 0) * material.conversionFactor 
+        : (purchase.item!.quantity || 0),
+      convertedUnit: material.baseUnit || material.unit || 'kg',
       equivalentPieces: material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0
-        ? (material.conversionFactor > 0 
-            ? purchase.item!.quantity * material.conversionFactor 
-            : purchase.item!.quantity) * material.piecesPerBaseUnit
+        ? ((material.conversionFactor || 0) > 0 
+            ? (purchase.item!.quantity || 0) * material.conversionFactor 
+            : (purchase.item!.quantity || 0)) * material.piecesPerBaseUnit
         : undefined,
       source: 'Purchase',
-      notes: purchase.notes || `PO-${purchase.purchaseNumber}`
+      notes: purchase.notes || (purchase.purchaseNumber ? `PO-${purchase.purchaseNumber}` : 'Purchase order')
     })),
     ...materialUsageLogs.map((usage) => ({
       type: 'consumption' as const,
-      date: usage.date,
-      quantity: usage.quantity,
-      unit: usage.unit,
+      date: usage.date || '',
+      quantity: usage.quantity || 0,
+      unit: usage.unit || material.baseUnit || 'kg',
       wastage1: usage.wastage1,
       wastage2: usage.wastage2,
-      totalDeduction: usage.totalDeduction || usage.quantity,
-      convertedQuantity: usage.baseQuantity || usage.quantity,
-      convertedUnit: usage.baseUnit || usage.unit,
+      totalDeduction: usage.totalDeduction || usage.quantity || 0,
+      convertedQuantity: usage.baseQuantity || usage.quantity || 0,
+      convertedUnit: usage.baseUnit || usage.unit || material.baseUnit || 'kg',
       equivalentPieces: usage.equivalentPieces,
       source: 'Production Consumption',
       notes: usage.notes || usage.productionBatch || 'Routine deduction'
     }))
   ].sort((a, b) => {
-    const dateA = new Date(a.date).getTime();
-    const dateB = new Date(b.date).getTime();
+    const dateA = a.date ? new Date(a.date).getTime() : 0;
+    const dateB = b.date ? new Date(b.date).getTime() : 0;
     return dateB - dateA; // Newest first
   });
 

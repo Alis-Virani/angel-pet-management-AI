@@ -9,21 +9,29 @@ import { RawMaterial } from '../types';
  */
 export function toBaseQuantity(
   quantity: number,
-  fromUnit: string,
+  fromUnit: string | undefined,
   material: RawMaterial
 ): number {
+  if (typeof quantity !== 'number' || isNaN(quantity)) return 0;
+  if (!material) return quantity;
+
+  const baseUnit = (material.baseUnit || material.unit || 'kg').toLowerCase();
+  const purchaseUnit = (material.purchaseUnit || material.unit || 'kg').toLowerCase();
+  const consumptionUnit = (material.consumptionUnit || material.baseUnit || material.unit || 'kg').toLowerCase();
+  const from = (fromUnit || baseUnit).toLowerCase();
+
   // If already in base unit, return as-is
-  if (fromUnit.toLowerCase() === material.baseUnit.toLowerCase()) {
+  if (from === baseUnit) {
     return quantity;
   }
 
   // If converting from purchase unit
-  if (fromUnit.toLowerCase() === material.purchaseUnit.toLowerCase()) {
-    return quantity * material.conversionFactor;
+  if (from === purchaseUnit) {
+    return quantity * (material.conversionFactor || 1);
   }
 
   // If converting from consumption unit (should be same as base, but handle gracefully)
-  if (fromUnit.toLowerCase() === material.consumptionUnit.toLowerCase()) {
+  if (from === consumptionUnit) {
     return quantity;
   }
 
@@ -45,16 +53,24 @@ export function toBaseQuantity(
  */
 export function fromBaseQuantity(
   baseQuantity: number,
-  toUnit: string,
+  toUnit: string | undefined,
   material: RawMaterial
 ): number {
+  if (typeof baseQuantity !== 'number' || isNaN(baseQuantity)) return 0;
+  if (!material) return baseQuantity;
+
+  const baseUnit = (material.baseUnit || material.unit || 'kg').toLowerCase();
+  const purchaseUnit = (material.purchaseUnit || material.unit || 'kg').toLowerCase();
+  const consumptionUnit = (material.consumptionUnit || material.baseUnit || material.unit || 'kg').toLowerCase();
+  const target = (toUnit || baseUnit).toLowerCase();
+
   // If converting to base unit, return as-is
-  if (toUnit.toLowerCase() === material.baseUnit.toLowerCase()) {
+  if (target === baseUnit) {
     return baseQuantity;
   }
 
   // If converting to purchase unit
-  if (toUnit.toLowerCase() === material.purchaseUnit.toLowerCase()) {
+  if (target === purchaseUnit) {
     if (material.conversionFactor && material.conversionFactor > 0) {
       return baseQuantity / material.conversionFactor;
     }
@@ -62,7 +78,7 @@ export function fromBaseQuantity(
   }
 
   // If converting to consumption unit (should be same as base)
-  if (toUnit.toLowerCase() === material.consumptionUnit.toLowerCase()) {
+  if (target === consumptionUnit) {
     return baseQuantity;
   }
 
@@ -80,7 +96,8 @@ export function fromBaseQuantity(
  * @param unit - The unit string
  * @returns User-friendly unit name
  */
-export function getUnitDisplayName(unit: string): string {
+export function getUnitDisplayName(unit: string | undefined | null): string {
+  if (!unit || typeof unit !== 'string') return '';
   const unitMap: { [key: string]: string } = {
     'kg': 'kg',
     'g': 'g',
@@ -103,9 +120,10 @@ export function getUnitDisplayName(unit: string): string {
  * @param unit - The unit
  * @returns Formatted string (e.g., "5,000 kg")
  */
-export function formatQuantityWithUnit(quantity: number, unit: string): string {
+export function formatQuantityWithUnit(quantity: number | undefined | null, unit: string | undefined | null): string {
+  const safeQty = typeof quantity === 'number' && !isNaN(quantity) ? quantity : 0;
   const displayUnit = getUnitDisplayName(unit);
-  return `${quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${displayUnit}`;
+  return `${safeQty.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${displayUnit}`.trim();
 }
 
 /**
@@ -117,18 +135,22 @@ export function formatQuantityWithUnit(quantity: number, unit: string): string {
  */
 export function validateConsumption(
   quantity: number,
-  unit: string,
+  unit: string | undefined,
   material: RawMaterial
 ): { isValid: boolean; error?: string } {
-  if (quantity <= 0) {
+  if (typeof quantity !== 'number' || quantity <= 0 || isNaN(quantity)) {
     return { isValid: false, error: 'Quantity must be greater than 0' };
+  }
+  if (!material) {
+    return { isValid: false, error: 'Material not found' };
   }
 
   const baseQuantity = toBaseQuantity(quantity, unit, material);
+  const currentStock = material.currentStock ?? 0;
 
-  if (baseQuantity > material.currentStock) {
-    const availableBase = material.currentStock;
-    const availableDisplay = formatQuantityWithUnit(availableBase, material.baseUnit);
+  if (baseQuantity > currentStock) {
+    const availableBase = currentStock;
+    const availableDisplay = formatQuantityWithUnit(availableBase, material.baseUnit || material.unit || 'kg');
     return {
       isValid: false,
       error: `Insufficient stock. Available: ${availableDisplay}`
@@ -149,18 +171,20 @@ export function getStockInBothUnits(material: RawMaterial): {
   purchaseQuantity: number;
   purchaseUnit: string;
 } {
-  const baseQuantity = material.currentStock;
+  const baseQuantity = material?.currentStock ?? 0;
+  const baseUnit = material?.baseUnit || material?.unit || 'kg';
+  const purchaseUnit = material?.purchaseUnit || material?.unit || baseUnit;
   const purchaseQuantity = fromBaseQuantity(
     baseQuantity,
-    material.purchaseUnit,
+    purchaseUnit,
     material
   );
 
   return {
     baseQuantity,
-    baseUnit: material.baseUnit,
+    baseUnit,
     purchaseQuantity,
-    purchaseUnit: material.purchaseUnit
+    purchaseUnit
   };
 }
 
@@ -170,7 +194,8 @@ export function getStockInBothUnits(material: RawMaterial): {
  * @param material - The raw material with pieces conversion
  * @returns Equivalent pieces or undefined if no conversion exists
  */
-export function calculateEquivalentPieces(baseQuantity: number, material: RawMaterial): number | undefined {
+export function calculateEquivalentPieces(baseQuantity: number | undefined | null, material: RawMaterial): number | undefined {
+  if (typeof baseQuantity !== 'number' || isNaN(baseQuantity) || !material) return undefined;
   if (material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0) {
     return baseQuantity * material.piecesPerBaseUnit;
   }
