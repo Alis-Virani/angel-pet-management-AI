@@ -50,6 +50,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const loading = submittingMode !== null;
   const [error, setError] = useState('');
+  // Ref-based guard: prevents duplicate submissions even across concurrent React re-renders
+  const isSubmittingRef = useRef(false);
 
   // Form states
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -362,13 +364,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   };
 
   const handleSave = async (andPrint: boolean) => {
-    if (submittingMode !== null) return;
+    // Dual guard: ref (synchronous) + state (for UI) prevent duplicate submissions
+    if (isSubmittingRef.current || submittingMode !== null) return;
+    isSubmittingRef.current = true;
     setError('');
 
     const validItems = items.filter((item) => Boolean(item.productId));
 
     if (validItems.length === 0) {
       setError(t('Please select a product for at least one order item.'));
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -389,6 +394,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (invalidPriceItem) {
       const product = products.find((candidate) => candidate.id === invalidPriceItem.productId);
       setError(`Product "${product?.name || 'Selected product'}" does not have a valid price for Category ${priceCategory}. Please configure product prices in Product Directory before creating this order.`);
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -401,6 +407,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       return item.quantity === '' || !isPositiveInteger(item.quantity);
     })) {
       setError('Please enter a valid positive whole quantity. For packet selling, Number of Packets must be a positive whole number.');
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -409,16 +416,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       return item.sellByPacket && !getProductUnitsPerPacket(product);
     })) {
       setError('Packet selling is only available when the product has a valid Units per Packet value.');
+      isSubmittingRef.current = false;
       return;
     }
 
-    // If Save & Print is selected, open print tab immediately to avoid popup blockers
+    // For Save & Print: open a blank tab immediately (inside the user-gesture call stack)
+    // so browsers do not treat it as a popup and block it.
     let printWin: Window | null = null;
     if (andPrint) {
       try {
         printWin = window.open('', '_blank');
         if (printWin) {
-          printWin.document.write('<!DOCTYPE html><html><head><title>Generating Invoice...</title></head><body style="font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;color:#475569;background:#f8fafc;"><h3>Preparing Sales Invoice...</h3></body></html>');
+          printWin.document.write('<!DOCTYPE html><html><head><title>Generating Invoice...</title></head><body style="font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;color:#475569;background:#f8fafc;"><h3>Preparing Sales Invoice…</h3></body></html>');
           printWin.document.close();
         }
       } catch (e) {
@@ -439,6 +448,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
           if (printWin && !printWin.closed) printWin.close();
           setError('Please enter inline customer details.');
           setSubmittingMode(null);
+          isSubmittingRef.current = false;
           return;
         }
         const createdCustomer = await addCustomer({
@@ -482,36 +492,39 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         orderType
       });
 
-      // Save completed successfully
-      setSubmittingMode(null);
-      setSaveSuccess(true);
-
-      // Show success animation for 500ms
-      await new Promise(resolve => setTimeout(resolve, 500));
-
       if (andPrint) {
-        // Trigger print for the newly created order
+        // ── Save & Print path ────────────────────────────────────────────────
+        // 1. Fire the print dialog immediately (non-blocking) into the pre-opened tab.
+        //    This must happen before onClose() so the tab reference is still valid.
         const printed = printInvoice(createdOrder, printWin, settings, targetCustomer, products);
         if (!printed) {
           console.warn('Popup was blocked by browser for invoice print.');
           alert('Invoice PDF could not be opened automatically. Please allow pop-ups for this site.');
         }
+        // 2. Close modal and refresh the order list immediately — no animation delay.
+        setSubmittingMode(null);
+        isSubmittingRef.current = false;
+        if (onOrderCreated) onOrderCreated();
+        onClose();
+      } else {
+        // ── Normal Save path ─────────────────────────────────────────────────
+        // Show brief success tick, then close.
+        setSubmittingMode(null);
+        setSaveSuccess(true);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setSaveSuccess(false);
+        isSubmittingRef.current = false;
+        if (onOrderCreated) onOrderCreated();
+        onClose();
       }
-
-      if (onOrderCreated) onOrderCreated();
-      onClose();
-      setSaveSuccess(false);
     } catch (err) {
       if (printWin && !printWin.closed) {
-        try {
-          printWin.close();
-        } catch {
-          // ignore
-        }
+        try { printWin.close(); } catch { /* ignore */ }
       }
       console.error(err);
       setError('Failed to create order. Please try again.');
       setSubmittingMode(null);
+      isSubmittingRef.current = false;
     }
   };
 
