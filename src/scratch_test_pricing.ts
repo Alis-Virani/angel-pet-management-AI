@@ -554,26 +554,25 @@ function runTests() {
     customerId: 'CUS-01',
     customerName: 'Test Customer',
     companyName: 'Test Packaging Co.',
-    priceCategory: 'B',
     items: [packetOrderItem],
     subtotal: itemSubtotal,
     gstAmount: itemSubtotal * 0.18,
-    grandTotal: itemSubtotal + (itemSubtotal * 0.18),
+    totalAmount: itemSubtotal + (itemSubtotal * 0.18),
     paymentType: 'debit_memo',
     paymentStatus: 'pending',
-    includeGst: true,
-    orderStatus: 'confirmed'
+    paidAmount: 0,
+    orderStatus: 'confirmed',
+    billType: 'pakka',
+    gstApplied: true,
+    gstRate: 18,
+    totalQuantity: currentQty
   };
 
-  const packetInvoiceHtml = generateInvoiceHtml({
-    order: packetOrder,
-    settings: {
-      companyName: 'Angel Pet',
-      companyAddress: 'Plot 12, GIDC',
-      companyPhone: '9876543210',
-      companyGstin: '24AAAAA0000A1Z5',
-      bankDetails: ''
-    }
+  const packetInvoiceHtml = generateInvoiceHtml(packetOrder, {
+    companyName: 'Angel Pet',
+    address: 'Plot 12, GIDC',
+    phone: '9876543210',
+    gstin: '24AAAAA0000A1Z5'
   });
 
   console.assert(packetInvoiceHtml.includes('25 Packets'), 'Invoice includes 25 Packets display');

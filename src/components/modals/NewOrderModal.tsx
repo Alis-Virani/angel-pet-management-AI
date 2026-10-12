@@ -119,8 +119,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (!isValidProductPrice(autoRate)) return false;
 
     const unitsPerPacket = getProductUnitsPerPacket(product);
-    if (unitsPerPacket && typeof item.packetCount === 'number' && item.packetCount > 0) {
-      return true;
+    if (unitsPerPacket && item.sellByPacket) {
+      return typeof item.packetCount === 'number' && item.packetCount > 0;
     }
     return isPositiveInteger(item.quantity);
   };
@@ -202,18 +202,17 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const capProduct = item.selectedCapId ? products.find((p) => p.id === item.selectedCapId) : null;
 
       const unitsPerPacket = getProductUnitsPerPacket(product);
+      const isPacketMode = Boolean(item.sellByPacket && unitsPerPacket);
       const rawQty = item.quantity === '' ? 0 : Number(item.quantity);
-      const quantity = rawQty > 0
-        ? rawQty
-        : (unitsPerPacket && typeof item.packetCount === 'number' && item.packetCount > 0
-            ? calculatePacketUnits(item.packetCount, unitsPerPacket)
-            : 0);
+      const rawPackets = typeof item.packetCount === 'number' && item.packetCount > 0 ? item.packetCount : 0;
 
-      const packetCount = unitsPerPacket && quantity > 0
-        ? calculatePacketsFromQuantity(quantity, unitsPerPacket)
-        : (typeof item.packetCount === 'number' && item.packetCount > 0 ? item.packetCount : undefined);
+      const quantity = isPacketMode && unitsPerPacket
+        ? calculatePacketUnits(rawPackets, unitsPerPacket)
+        : rawQty;
 
-      const sellByPacket = Boolean(unitsPerPacket && packetCount);
+      const packetCount = isPacketMode
+        ? rawPackets
+        : undefined;
 
       const unitPrice = calculateEffectiveItemRate({
         product,
@@ -259,7 +258,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         totalWeightDisplay: itemWeightGrams ? formatWeight(itemWeightGrams) : undefined
       };
 
-      if (sellByPacket && unitsPerPacket && packetCount) {
+      if (isPacketMode && unitsPerPacket && packetCount) {
         orderItem.soldByPacket = true;
         orderItem.packetCount = packetCount;
         orderItem.unitsPerPacket = unitsPerPacket;
@@ -288,8 +287,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const calculatedPackets = calculatePacketsFromQuantity(newQuantity, unitsPerPacket);
       updateItem(id, {
         quantity: newQuantity,
-        packetCount: calculatedPackets,
-        sellByPacket: true
+        packetCount: calculatedPackets
       });
     } else {
       updateItem(id, {
@@ -309,17 +307,56 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const derivedQuantity = calculatePacketUnits(newPacketCount, unitsPerPacket);
       updateItem(id, {
         packetCount: newPacketCount,
-        quantity: derivedQuantity,
-        sellByPacket: true
+        quantity: derivedQuantity
       });
     } else {
       updateItem(id, {
         packetCount: newPacketCount,
-        quantity: newPacketCount === '' ? '' : current?.quantity
+        quantity: ''
       });
     }
   };
 
+  const handleModeChange = (id: string, sellByPacket: boolean) => {
+    const current = items.find((item) => item.id === id);
+    if (!current) return;
+    const product = products.find((candidate) => candidate.id === current.productId);
+    const unitsPerPacket = getProductUnitsPerPacket(product);
+    if (!unitsPerPacket) return;
+
+    if (sellByPacket) {
+      // Switching to Packet mode: derive packet count from existing pieces if available
+      let packetCount: number | '' = '';
+      if (typeof current.packetCount === 'number' && current.packetCount > 0) {
+        packetCount = current.packetCount;
+      } else if (typeof current.quantity === 'number' && current.quantity > 0) {
+        packetCount = current.quantity % unitsPerPacket === 0
+          ? current.quantity / unitsPerPacket
+          : Math.max(1, Math.round(current.quantity / unitsPerPacket));
+      }
+      const derivedQuantity = typeof packetCount === 'number' && packetCount > 0
+        ? calculatePacketUnits(packetCount, unitsPerPacket)
+        : '';
+      updateItem(id, {
+        sellByPacket: true,
+        packetCount,
+        quantity: derivedQuantity
+      });
+    } else {
+      // Switching to Pieces mode: derive quantity in pieces from packets if quantity is empty
+      let quantity: number | '' = '';
+      if (typeof current.quantity === 'number' && current.quantity > 0) {
+        quantity = current.quantity;
+      } else if (typeof current.packetCount === 'number' && current.packetCount > 0) {
+        quantity = calculatePacketUnits(current.packetCount, unitsPerPacket);
+      }
+      updateItem(id, {
+        sellByPacket: false,
+        quantity,
+        packetCount: current.packetCount
+      });
+    }
+  };
 
   const handleProductSearchChange = (id: string, value: string) => {
     setProductSearches((currentSearches) => ({ ...currentSearches, [id]: value }));
@@ -346,7 +383,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       ...(oldItem || createDraftItem()),
       id: itemId,
       productId,
-      sellByPacket: Boolean(unitsPerPacket),
+      sellByPacket: Boolean(oldItem?.sellByPacket && unitsPerPacket),
       packetCount: initialPacketCount,
       selectedInnerId: defaultInnerId,
       selectedCapId: defaultCapId
@@ -425,18 +462,17 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       return;
     }
 
-    if (validItems.some((item) => {
+    const invalidQuantityItem = validItems.find((item) => {
       const product = products.find((candidate) => candidate.id === item.productId);
       const unitsPerPacket = getProductUnitsPerPacket(product);
-      if (item.quantity === '' || !isPositiveInteger(item.quantity)) {
-        if (unitsPerPacket && typeof item.packetCount === 'number' && item.packetCount > 0) {
-          return false;
-        }
-        return true;
+      if (unitsPerPacket && item.sellByPacket) {
+        return !isPositiveInteger(item.packetCount);
       }
-      return false;
-    })) {
-      setError('Please enter a valid positive whole quantity.');
+      return item.quantity === '' || !isPositiveInteger(item.quantity);
+    });
+
+    if (invalidQuantityItem) {
+      setError(t('Please enter a valid positive whole quantity. For packet selling, Number of Packets must be a positive whole number.'));
       isSubmittingRef.current = false;
       return;
     }
@@ -731,12 +767,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
           </div>
 
           {/* Desktop Table Header */}
-          <div className="hidden md:grid grid-cols-[minmax(220px,1.2fr)_110px_minmax(180px,1.5fr)_130px_40px] gap-3 px-3.5 py-2 bg-slate-200/50 rounded-xl text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+          <div className="hidden md:grid grid-cols-[minmax(220px,1.2fr)_150px_minmax(170px,1.4fr)_130px_40px] gap-3 px-3.5 py-2 bg-slate-200/50 rounded-xl text-[11px] font-bold text-slate-600 uppercase tracking-wider">
             <div>{t('Product Name')}</div>
-            <div className="flex items-center gap-1">
-              {t('Qty')}
-              <span className="text-blue-500 font-bold">/ Pkts</span>
-            </div>
+            <div>{t('Qty / Packets')}</div>
             <div>{t('Rate (₹)')}</div>
             <div className="text-right">{t('Subtotal (₹)')}</div>
             <div className="text-center">{t('Action')}</div>
@@ -759,18 +792,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               const prevRates = getPreviousRatesForProduct(orders, item.productId, selectedCustomerId, 3);
               const unitsPerPacket = getProductUnitsPerPacket(product);
               const canSellByPacket = Boolean(unitsPerPacket);
+              const isPacketMode = Boolean(item.sellByPacket && unitsPerPacket);
               const rawQty = item.quantity === '' ? 0 : Number(item.quantity);
-              const itemQuantity = rawQty > 0
-                ? rawQty
-                : (unitsPerPacket && typeof item.packetCount === 'number' && item.packetCount > 0
-                    ? calculatePacketUnits(item.packetCount, unitsPerPacket)
-                    : 0);
+              const rawPackets = typeof item.packetCount === 'number' && item.packetCount > 0 ? item.packetCount : 0;
+              const itemQuantity = isPacketMode && unitsPerPacket
+                ? calculatePacketUnits(rawPackets, unitsPerPacket)
+                : rawQty;
 
               const packetBreakdown = unitsPerPacket && itemQuantity > 0
                 ? formatPacketBreakdown(itemQuantity, unitsPerPacket)
                 : { packets: 0, fullPackets: 0, remainderUnits: 0, displayText: '0 Packets' };
 
-              const calcPackets = packetBreakdown.packets;
+              const calcPackets = isPacketMode ? rawPackets : packetBreakdown.packets;
               const productSearch = productSearches[item.id] || '';
               const isProductSearchFocused = focusedProductItemId === item.id;
               const matchingProducts = products.filter((candidate) => {
@@ -790,7 +823,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   key={item.id}
                   className="p-3.5 rounded-2xl border bg-white border-slate-200/90 shadow-sm hover:border-slate-300 transition-all space-y-3"
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-[minmax(220px,1.2fr)_110px_minmax(180px,1.5fr)_130px_40px] gap-3 items-start">
+                  <div className="grid grid-cols-1 md:grid-cols-[minmax(220px,1.2fr)_150px_minmax(170px,1.4fr)_130px_40px] gap-3 items-start">
                     {/* Product Field */}
                     <div>
                       <label className="block md:hidden text-[11px] font-semibold text-slate-600 mb-1">
@@ -866,56 +899,149 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Quantity */}
+                    {/* Quantity / Mode */}
                     <div>
                       <label className="block md:hidden text-[11px] font-semibold text-slate-600 mb-1">
-                        {unitsPerPacket ? (
-                          <span className="flex items-center gap-1">
-                            {t('Quantity')}
-                            <span className="text-blue-500">/ Pkts</span>
-                          </span>
-                        ) : t('Quantity')}
+                        {canSellByPacket ? t('Qty / Packets') : t('Quantity')}
                       </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        required={Boolean(item.productId)}
-                        placeholder="0"
-                        value={item.quantity === '' ? '' : String(item.quantity)}
-                        onChange={(e) => handleQuantityChange(item.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleRowEnter(index);
-                          }
-                        }}
-                        className="w-full h-10 px-3 bg-slate-50 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
-                      />
+
                       {unitsPerPacket ? (
-                        <div
-                          className="text-[10px] font-bold text-blue-600 mt-1 truncate flex items-center gap-1"
-                          title={
-                            itemQuantity > 0
-                              ? `${packetBreakdown.displayText} (${unitsPerPacket.toLocaleString('en-IN')} units/packet)`
-                              : `Configured: ${unitsPerPacket.toLocaleString('en-IN')} units/packet`
-                          }
-                        >
-                          <Package className="w-3 h-3 text-blue-500 shrink-0" />
-                          {itemQuantity > 0 ? (
-                            <>
-                              <span className="font-bold">{calcPackets.toLocaleString('en-IN')} pkts</span>
-                              <span className="font-normal text-slate-400">({itemQuantity.toLocaleString('en-IN')} units)</span>
-                            </>
+                        <div className="space-y-1.5">
+                          {/* Packet / Pieces Mode Switcher */}
+                          <div className="inline-flex w-full p-0.5 bg-slate-200/80 rounded-lg text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => handleModeChange(item.id, false)}
+                              className={`flex-1 py-1 px-1.5 rounded-md text-center transition-all ${
+                                !item.sellByPacket
+                                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                                  : 'text-slate-500 hover:text-slate-800 font-medium'
+                              }`}
+                              title={t('Enter quantity in pieces')}
+                            >
+                              {t('Pieces')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleModeChange(item.id, true)}
+                              className={`flex-1 py-1 px-1.5 rounded-md text-center transition-all ${
+                                item.sellByPacket
+                                  ? 'bg-blue-600 text-white shadow-xs font-bold'
+                                  : 'text-slate-500 hover:text-slate-800 font-medium'
+                              }`}
+                              title={`${t('Enter packet count')} (${unitsPerPacket.toLocaleString('en-IN')} ${t('Units per Packet')})`}
+                            >
+                              {t('Packet')}
+                            </button>
+                          </div>
+
+                          {item.sellByPacket ? (
+                            <div>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  required={Boolean(item.productId)}
+                                  placeholder="0"
+                                  value={item.packetCount === '' ? '' : String(item.packetCount)}
+                                  onChange={(e) => handlePacketCountChange(item.id, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleRowEnter(index);
+                                    }
+                                  }}
+                                  className="w-full h-9 px-3 pr-10 bg-blue-50/40 text-xs font-semibold text-slate-900 rounded-xl border border-blue-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                                />
+                                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-blue-600 pointer-events-none">
+                                  pkts
+                                </span>
+                              </div>
+                              <div
+                                className="text-[10px] font-bold text-blue-700 mt-1 truncate flex items-center gap-1"
+                                title={`${rawPackets.toLocaleString('en-IN')} pkts × ${unitsPerPacket.toLocaleString('en-IN')} = ${itemQuantity.toLocaleString('en-IN')} pcs`}
+                              >
+                                <Package className="w-3 h-3 text-blue-500 shrink-0" />
+                                {itemQuantity > 0 ? (
+                                  <>
+                                    <span className="font-bold text-blue-700">{itemQuantity.toLocaleString('en-IN')} pcs</span>
+                                    <span className="text-slate-400 font-normal">({rawPackets.toLocaleString('en-IN')} × {unitsPerPacket.toLocaleString('en-IN')})</span>
+                                  </>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">— pcs (@{unitsPerPacket.toLocaleString('en-IN')} u/pkt)</span>
+                                )}
+                              </div>
+                            </div>
                           ) : (
-                            <>
-                              <span className="text-slate-400">— pkts</span>
-                              <span className="font-normal text-slate-400">(@{unitsPerPacket.toLocaleString('en-IN')} u/pkt)</span>
-                            </>
+                            <div>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  required={Boolean(item.productId)}
+                                  placeholder="0"
+                                  value={item.quantity === '' ? '' : String(item.quantity)}
+                                  onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleRowEnter(index);
+                                    }
+                                  }}
+                                  className="w-full h-9 px-3 pr-8 bg-slate-50 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                                />
+                                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-400 pointer-events-none">
+                                  pcs
+                                </span>
+                              </div>
+                              <div
+                                className="text-[10px] font-semibold text-blue-600 mt-1 truncate flex items-center gap-1"
+                                title={
+                                  itemQuantity > 0
+                                    ? `${packetBreakdown.displayText} (${unitsPerPacket.toLocaleString('en-IN')} units/packet)`
+                                    : `Configured: ${unitsPerPacket.toLocaleString('en-IN')} units/packet`
+                                }
+                              >
+                                <Package className="w-3 h-3 text-blue-500 shrink-0" />
+                                {itemQuantity > 0 ? (
+                                  <>
+                                    <span className="font-bold">{calcPackets.toLocaleString('en-IN')} pkts</span>
+                                    <span className="text-slate-400 font-normal">({itemQuantity.toLocaleString('en-IN')} units)</span>
+                                  </>
+                                ) : (
+                                  <span className="text-slate-400 font-normal">@{unitsPerPacket.toLocaleString('en-IN')} u/pkt</span>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       ) : (
-                        <div className="text-[10px] font-medium text-slate-400 mt-1">{t('Units')}</div>
+                        <div>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              required={Boolean(item.productId)}
+                              placeholder="0"
+                              value={item.quantity === '' ? '' : String(item.quantity)}
+                              onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleRowEnter(index);
+                                }
+                              }}
+                              className="w-full h-10 px-3 pr-8 bg-slate-50 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-medium text-slate-400 pointer-events-none">
+                              pcs
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-medium text-slate-400 mt-1">{t('Units')}</div>
+                        </div>
                       )}
                     </div>
 
