@@ -1,5 +1,5 @@
 import { getProductPriceForCategory, isValidProductPrice, formatPrice, getPriceCategoryLabel, getPreviousRatesForProduct, formatPreviousRates } from '../src/utils/pricingUtils';
-import { calculatePacketUnits, getProductUnitsPerPacket } from '../src/utils/packetUtils';
+import { calculatePacketUnits, getProductUnitsPerPacket, calculatePacketsFromQuantity, formatPacketBreakdown, orderItemSoldByPacket } from '../src/utils/packetUtils';
 import { generateInvoiceHtml, amountInWords, numToWords } from '../src/utils/invoicePrintUtils';
 import { Product, OrderItem, PriceCategory, Order } from '../src/types';
 
@@ -502,7 +502,88 @@ function runTests() {
   console.assert(catCSubtotal === 200 * 80 + 200 * 2.40 + 200 * 4.00, `Category C subtotal: ${catCSubtotal}`);
   console.log(`✔ Test 20: Price category changes verified (Cat B Subtotal: ₹${catBSubtotal}, Cat C Subtotal: ₹${catCSubtotal})`);
 
-  console.log('\nAll 20 pricing, packaging combinations & invoice unit tests passed successfully!');
+  // 21. Automatic packet count calculation from entered quantity using configured unitsPerPacket
+  const configuredUnitsPerPacket = getProductUnitsPerPacket(sampleProduct1)!; // 100
+  const enteredQtyExact = 1000;
+  const calculatedPacketsExact = calculatePacketsFromQuantity(enteredQtyExact, configuredUnitsPerPacket);
+  console.assert(calculatedPacketsExact === 10, `Expected 10 packets, got ${calculatedPacketsExact}`);
+  const breakdownExact = formatPacketBreakdown(enteredQtyExact, configuredUnitsPerPacket);
+  console.assert(breakdownExact.displayText === '10 Packets', `Expected '10 Packets', got '${breakdownExact.displayText}'`);
+
+  const enteredQtyFractional = 1050;
+  const calculatedPacketsFractional = calculatePacketsFromQuantity(enteredQtyFractional, configuredUnitsPerPacket);
+  console.assert(calculatedPacketsFractional === 10.5, `Expected 10.5 packets, got ${calculatedPacketsFractional}`);
+  const breakdownFractional = formatPacketBreakdown(enteredQtyFractional, configuredUnitsPerPacket);
+  console.assert(breakdownFractional.fullPackets === 10 && breakdownFractional.remainderUnits === 50, 'Expected 10 full packets and 50 loose units');
+  console.log(`✔ Test 21: Automatic packet count calculation verified (1000 units / 100 = ${calculatedPacketsExact} pkts; 1050 units / 100 = ${calculatedPacketsFractional} pkts [10 full + 50 loose])`);
+
+  // 22. Dynamic updates & preservation of pricing and invoice calculations
+  let currentQty = 1000;
+  let dynamicPackets = calculatePacketsFromQuantity(currentQty, configuredUnitsPerPacket);
+  let itemRate = p1_B!; // 3.10
+  let itemSubtotal = currentQty * itemRate;
+  console.assert(dynamicPackets === 10 && itemSubtotal === 3100, 'Initial calculation accurate');
+
+  // Quantity changes dynamically to 2500
+  currentQty = 2500;
+  dynamicPackets = calculatePacketsFromQuantity(currentQty, configuredUnitsPerPacket);
+  itemSubtotal = currentQty * itemRate;
+  console.assert(dynamicPackets === 25, `Expected 25 packets, got ${dynamicPackets}`);
+  console.assert(itemSubtotal === 7750, `Expected 7750 subtotal, got ${itemSubtotal}`);
+
+  const packetOrderItem: OrderItem = {
+    id: 'item-pkt-1',
+    productId: sampleProduct1.id,
+    productName: sampleProduct1.name,
+    productType: sampleProduct1.type,
+    priceCategory: 'B',
+    unitPrice: itemRate,
+    quantity: currentQty,
+    subtotal: itemSubtotal,
+    soldByPacket: true,
+    packetCount: dynamicPackets,
+    unitsPerPacket: configuredUnitsPerPacket
+  };
+
+  console.assert(orderItemSoldByPacket(packetOrderItem), 'orderItemSoldByPacket should be true');
+
+  const packetOrder: Order = {
+    id: 'ORD-PKT-001',
+    orderNumber: 'ORD-PKT-001',
+    orderDate: '2026-03-29',
+    customerId: 'CUS-01',
+    customerName: 'Test Customer',
+    companyName: 'Test Packaging Co.',
+    priceCategory: 'B',
+    items: [packetOrderItem],
+    subtotal: itemSubtotal,
+    gstAmount: itemSubtotal * 0.18,
+    grandTotal: itemSubtotal + (itemSubtotal * 0.18),
+    paymentType: 'debit_memo',
+    paymentStatus: 'pending',
+    includeGst: true,
+    orderStatus: 'confirmed'
+  };
+
+  const packetInvoiceHtml = generateInvoiceHtml({
+    order: packetOrder,
+    settings: {
+      companyName: 'Angel Pet',
+      companyAddress: 'Plot 12, GIDC',
+      companyPhone: '9876543210',
+      companyGstin: '24AAAAA0000A1Z5',
+      bankDetails: ''
+    }
+  });
+
+  console.assert(packetInvoiceHtml.includes('25 Packets'), 'Invoice includes 25 Packets display');
+  console.assert(packetInvoiceHtml.includes('100 pcs/pkt'), 'Invoice includes configured units per packet');
+  console.assert(packetInvoiceHtml.includes('Total: 2,500 pcs'), 'Invoice includes total pcs');
+  console.assert(packetInvoiceHtml.includes('₹7,750.00'), 'Invoice preserves line subtotal calculation');
+  console.assert(packetInvoiceHtml.includes('₹9,145.00'), 'Invoice preserves grand total calculation (7750 + 18% GST)');
+  console.log('✔ Test 22: Dynamic quantity change to 2500 units updates packet count (25 pkts) while preserving pricing (₹7,750.00) & invoice layout');
+
+  console.log('\nAll 22 pricing, packet conversion & invoice unit tests passed successfully!');
 }
 
 runTests();
