@@ -607,7 +607,7 @@ export function printInvoice(
     targetWin.document.write(invoiceHtml);
     targetWin.document.close();
 
-    // Small delay to ensure rendering before invoking print
+    // Delay to ensure rendering before invoking print
     targetWin.setTimeout(() => {
       try {
         targetWin?.focus();
@@ -615,7 +615,7 @@ export function printInvoice(
       } catch (e) {
         console.error('Error invoking print:', e);
       }
-    }, 250);
+    }, 100);
 
     return true;
   } catch (err) {

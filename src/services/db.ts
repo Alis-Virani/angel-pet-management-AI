@@ -104,6 +104,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs = 2500): Promise<T> {
   ]);
 }
 
+// Strip undefined properties because Firestore setDoc throws on undefined fields
+function sanitizeForFirestore<T>(data: T): any {
+  if (data === undefined || data === null) return null;
+  return JSON.parse(JSON.stringify(data));
+}
+
 // Helper to merge LocalStorage items and Remote Firestore items safely without losing local state
 function mergeLocalAndRemote<T extends { id: string }>(localList: T[], remoteList: T[]): T[] {
   const remoteMap = new Map(remoteList.map((item) => [item.id, item]));
@@ -468,7 +474,7 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
   setLocalItem(STORAGE_KEYS.ORDERS, [newOrder, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'orders', newOrder.id), newOrder), 2500).catch((e) =>
+    withTimeout(setDoc(doc(getDb(), 'orders', newOrder.id), sanitizeForFirestore(newOrder)), 2500).catch((e) =>
       console.error('Error adding order to Firebase:', e)
     );
   }
@@ -505,7 +511,7 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
     setLocalItem(STORAGE_KEYS.PAYMENTS, [newPayment, ...paymentList]);
 
     if (shouldSyncToFirebase()) {
-      withTimeout(setDoc(doc(getDb(), 'payments', newPayment.id), newPayment), 2500).catch((e) =>
+      withTimeout(setDoc(doc(getDb(), 'payments', newPayment.id), sanitizeForFirestore(newPayment)), 2500).catch((e) =>
         console.error('Error adding Cash Memo payment to Firebase:', e)
       );
     }
@@ -533,7 +539,7 @@ export async function updateOrder(id: string, updates: Partial<Order>): Promise<
   setLocalItem(STORAGE_KEYS.ORDERS, newList);
 
   if (shouldSyncToFirebase() && updated) {
-    withTimeout(setDoc(doc(getDb(), 'orders', id), updated, { merge: true }), 2500).catch((e) =>
+    withTimeout(setDoc(doc(getDb(), 'orders', id), sanitizeForFirestore(updated), { merge: true }), 2500).catch((e) =>
       console.error('Error updating order in Firebase:', e)
     );
   }

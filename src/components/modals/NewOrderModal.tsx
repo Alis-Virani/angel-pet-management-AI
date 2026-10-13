@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Customer, Product, OrderItem, PriceCategory, Order, Settings, PaymentDocumentType, PackagingMode, OrderType } from '../../types';
 import { getCustomers, getProducts, getOrders, getSettings, addOrder, addCustomer } from '../../services/db';
-import { ShoppingCart, Check, Plus, AlertCircle, Search, Trash2, Printer, Link2, Package, Layers } from 'lucide-react';
+import { ShoppingCart, Check, Plus, AlertCircle, Search, Trash2, Printer, Link2, Package, Layers, X, Loader2, CheckCircle2 } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import { calculatePacketUnits, getProductUnitsPerPacket, isPositiveInteger, parsePositiveInteger, calculatePacketsFromQuantity, formatPacketBreakdown, isPositiveNumber } from '../../utils/packetUtils';
 import { getProductPriceForCategory, isValidProductPrice, getPreviousRatesForProduct, formatPreviousRates, calculateEffectiveItemRate, getBottleComboPrice } from '../../utils/pricingUtils';
@@ -48,7 +48,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [settings, setSettings] = useState<Settings | null>(null);
   const [submittingMode, setSubmittingMode] = useState<'save' | 'save_and_print' | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const loading = submittingMode !== null;
+  const [showPrintSuccessPopup, setShowPrintSuccessPopup] = useState(false);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loading = submittingMode !== null || showPrintSuccessPopup;
   const [error, setError] = useState('');
   // Ref-based guard: prevents duplicate submissions even across concurrent React re-renders
   const isSubmittingRef = useRef(false);
@@ -76,9 +78,47 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [newCustomerCompany, setNewCustomerCompany] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
+  const handleDismissSuccessPopup = () => {
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+      successTimeoutRef.current = null;
+    }
+    setShowPrintSuccessPopup(false);
+    setSubmittingMode(null);
+    isSubmittingRef.current = false;
+    onClose();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (isOpen) {
       loadData();
+      isSubmittingRef.current = false;
+      setSubmittingMode(null);
+      setSaveSuccess(false);
+      setShowPrintSuccessPopup(false);
+      setError('');
+    } else {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = null;
+      }
+      // Reset state when modal closes
+      setSelectedCustomerId('');
+      setCustomerSearch('');
+      setIsCustomerSearchFocused(false);
+      setSubmittingMode(null);
+      setSaveSuccess(false);
+      setShowPrintSuccessPopup(false);
+      isSubmittingRef.current = false;
     }
   }, [isOpen]);
 
@@ -174,6 +214,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     setPriceCategory(cus.priceCategory);
     setCustomerSearch('');
     setIsCustomerSearchFocused(false);
+  };
+
+  const handleClearCustomer = () => {
+    setSelectedCustomerId('');
+    setCustomerSearch('');
+    setIsCustomerSearchFocused(true);
   };
 
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
@@ -360,6 +406,20 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
   const handleProductSearchChange = (id: string, value: string) => {
     setProductSearches((currentSearches) => ({ ...currentSearches, [id]: value }));
+    setFocusedProductItemId(id);
+  };
+
+  const handleClearProduct = (itemId: string) => {
+    updateItem(itemId, {
+      productId: '',
+      quantity: '',
+      sellByPacket: false,
+      packetCount: '',
+      selectedInnerId: '',
+      selectedCapId: ''
+    });
+    setProductSearches((currentSearches) => ({ ...currentSearches, [itemId]: '' }));
+    setFocusedProductItemId(itemId);
   };
 
   const handleProductSelect = (itemId: string, productId: string) => {
@@ -429,14 +489,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
   const handleSave = async (andPrint: boolean) => {
     // Dual guard: ref (synchronous) + state (for UI) prevent duplicate submissions
-    if (isSubmittingRef.current || submittingMode !== null) return;
+    if (isSubmittingRef.current || submittingMode !== null || showPrintSuccessPopup) return;
     isSubmittingRef.current = true;
+    setSubmittingMode(andPrint ? 'save_and_print' : 'save');
     setError('');
 
     const validItems = items.filter((item) => Boolean(item.productId));
 
     if (validItems.length === 0) {
       setError(t('Please select a product for at least one order item.'));
+      setSubmittingMode(null);
       isSubmittingRef.current = false;
       return;
     }
@@ -458,6 +520,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (invalidPriceItem) {
       const product = products.find((candidate) => candidate.id === invalidPriceItem.productId);
       setError(`Product "${product?.name || 'Selected product'}" does not have a valid price for Category ${priceCategory}. Please configure product prices in Product Directory before creating this order.`);
+      setSubmittingMode(null);
       isSubmittingRef.current = false;
       return;
     }
@@ -473,6 +536,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     if (invalidQuantityItem) {
       setError(t('Please enter a valid positive whole quantity. For packet selling, Number of Packets must be a positive whole number.'));
+      setSubmittingMode(null);
       isSubmittingRef.current = false;
       return;
     }
@@ -491,8 +555,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         printWin = null;
       }
     }
-
-    setSubmittingMode(andPrint ? 'save_and_print' : 'save');
 
     try {
       let finalCustomerId = selectedCustomerId;
@@ -551,18 +613,22 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
       if (andPrint) {
         // ── Save & Print path ────────────────────────────────────────────────
-        // 1. Fire the print dialog immediately (non-blocking) into the pre-opened tab.
-        //    This must happen before onClose() so the tab reference is still valid.
+        // 1. Immediately show clear success popup
+        setShowPrintSuccessPopup(true);
+
+        // 2. Open print dialog into the pre-opened tab (or newly opened tab)
         const printed = printInvoice(createdOrder, printWin, settings, targetCustomer, products);
         if (!printed) {
           console.warn('Popup was blocked by browser for invoice print.');
-          alert('Invoice PDF could not be opened automatically. Please allow pop-ups for this site.');
         }
-        // 2. Close modal and refresh the order list immediately — no animation delay.
-        setSubmittingMode(null);
-        isSubmittingRef.current = false;
+
+        // 3. Notify parent that order was created so underlying tables refresh
         if (onOrderCreated) onOrderCreated();
-        onClose();
+
+        // 4. Auto-close modal after user sees the success popup (or user can click Done)
+        successTimeoutRef.current = setTimeout(() => {
+          handleDismissSuccessPopup();
+        }, 2200);
       } else {
         // ── Normal Save path ─────────────────────────────────────────────────
         // Show brief success tick, then close.
@@ -588,11 +654,50 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => {
+        if (!loading && !isSubmittingRef.current && !showPrintSuccessPopup) {
+          onClose();
+        }
+      }}
       title={t('Create New Sales Order')}
       subtitle={t('Build one order with any combination of products')}
       maxWidth="4xl"
     >
+      {showPrintSuccessPopup && (
+        <div
+          id="save-and-print-success-popup"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="save-and-print-success-title"
+          className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+        >
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 p-6 sm:p-7 text-center transform animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-100/80 shadow-sm ring-8 ring-emerald-50/50">
+              <CheckCircle2 className="w-9 h-9" />
+            </div>
+            <h3
+              id="save-and-print-success-title"
+              className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight mb-2"
+            >
+              {t('Sales Order Saved Successfully!')}
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed mb-6">
+              {t('Your order has been saved and the print dialog is opening.')}
+            </p>
+            <div className="flex items-center justify-center">
+              <button
+                type="button"
+                id="save-and-print-done-button"
+                onClick={handleDismissSuccessPopup}
+                className="w-full py-2.5 px-5 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>{t('Done')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <form onSubmit={(e) => { e.preventDefault(); handleSave(false); }} className="space-y-5">
         {error && (
           <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2 font-medium">
@@ -675,17 +780,30 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   aria-expanded={isCustomerSearchFocused}
                   aria-controls="customer-options-list"
                   value={isCustomerSearchFocused ? customerSearch : (selectedCustomer ? `${selectedCustomer.name} — ${selectedCustomer.company} — Tier ${selectedCustomer.priceCategory}` : '')}
-                  placeholder={selectedCustomer ? `${selectedCustomer.name} — ${selectedCustomer.company} — Tier ${selectedCustomer.priceCategory}` : t('Search customer by name, company, phone, or tier...')}
+                  placeholder={t('Search customer by name, company, phone, or tier...')}
                   onFocus={() => {
                     setIsCustomerSearchFocused(true);
                     setCustomerSearch('');
                   }}
-                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    setIsCustomerSearchFocused(true);
+                  }}
                   onBlur={() => {
                     window.setTimeout(() => setIsCustomerSearchFocused(false), 150);
                   }}
-                  className="w-full h-11 pl-9 pr-4 bg-white text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm"
+                  className="w-full h-11 pl-9 pr-10 bg-white text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm cursor-text"
                 />
+                {selectedCustomer && (
+                  <button
+                    type="button"
+                    onClick={handleClearCustomer}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    title={t('Clear customer selection')}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
               {isCustomerSearchFocused && (
                 <div id="customer-options-list" role="listbox" className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
@@ -840,10 +958,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                             aria-expanded={isProductSearchFocused}
                             aria-controls={`product-options-${item.id}`}
                             value={isProductSearchFocused ? productSearch : product?.name || ''}
-                            placeholder={product ? product.name : t('Search products...')}
+                            placeholder={t('Search products...')}
                             onFocus={() => {
                               setFocusedProductItemId(item.id);
-                              setProductSearches((currentSearches) => ({ ...currentSearches, [item.id]: '' }));
                             }}
                             onChange={(e) => handleProductSearchChange(item.id, e.target.value)}
                             onKeyDown={(e) => {
@@ -859,8 +976,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                             onBlur={() => {
                               window.setTimeout(() => setFocusedProductItemId((currentId) => currentId === item.id ? null : currentId), 150);
                             }}
-                            className="w-full h-10 pl-9 pr-3.5 text-xs font-semibold rounded-xl border bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                            className="w-full h-10 pl-9 pr-10 text-xs font-semibold rounded-xl border bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20 cursor-text"
                           />
+                          {product && (
+                            <button
+                              type="button"
+                              onClick={() => handleClearProduct(item.id)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                              title={t('Clear product selection')}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                         {isProductSearchFocused && (
                           <div id={`product-options-${item.id}`} role="listbox" className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
@@ -1513,7 +1640,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="btn-secondary"
+            className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {t('Cancel')}
           </button>
@@ -1521,35 +1648,46 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
             type="button"
             disabled={loading || saveSuccess}
             onClick={() => handleSave(false)}
-            className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 shadow-sm"
           >
             {saveSuccess ? (
               <>
                 <Check className="w-4 h-4" />
                 <span>Saved ✓</span>
               </>
+            ) : submittingMode === 'save' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{t('Saving order…')}</span>
+              </>
             ) : (
               <>
                 <Check className="w-4 h-4" />
-                <span>{submittingMode === 'save' ? t('Saving...') : t('Save')}</span>
+                <span>{t('Save')}</span>
               </>
             )}
           </button>
           <button
             type="button"
+            id="save-and-print-button"
             disabled={loading || saveSuccess}
             onClick={() => handleSave(true)}
-            className="btn-primary"
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {saveSuccess ? (
               <>
                 <Check className="w-4 h-4" />
                 <span>Saved ✓</span>
               </>
+            ) : submittingMode === 'save_and_print' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{t('Saving order…')}</span>
+              </>
             ) : (
               <>
                 <Printer className="w-4 h-4" />
-                <span>{submittingMode === 'save_and_print' ? t('Saving...') : t('Save & Print')}</span>
+                <span>{t('Save & Print')}</span>
               </>
             )}
           </button>
