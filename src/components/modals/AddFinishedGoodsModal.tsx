@@ -18,7 +18,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [productType, setProductType] = useState<ProductType>('bottle');
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [quantityProduced, setQuantityProduced] = useState<number | ''>('');
+  const [quantityProduced, setQuantityProduced] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,6 +26,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setQuantityProduced('');
       loadProducts();
     }
   }, [isOpen]);
@@ -57,7 +58,8 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       setError('Please select a product.');
       return;
     }
-    if (typeof quantityProduced !== 'number' || !Number.isFinite(quantityProduced) || quantityProduced <= 0) {
+    const parsedQuantity = Number(quantityProduced);
+    if (!quantityProduced.trim() || !Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
       setError('Quantity produced must be greater than 0.');
       return;
     }
@@ -69,7 +71,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
         productId: selectedProduct.id,
         productName: selectedProduct.name,
         type: productType,
-        quantityProduced: Number(quantityProduced),
+        quantityProduced: parsedQuantity,
         unit: selectedProduct.unit || 'pcs',
         date,
         source: 'Production',
@@ -147,7 +149,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
               required
               placeholder="Enter quantity produced"
               value={quantityProduced}
-              onChange={(e) => setQuantityProduced(e.target.value === '' ? '' : Number(e.target.value))}
+              onChange={(e) => setQuantityProduced(e.target.value)}
               className="form-input font-bold"
             />
           </div>
