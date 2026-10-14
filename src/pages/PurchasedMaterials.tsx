@@ -5,6 +5,7 @@ import {
   addPurchasedMaterial,
   deletePurchasedMaterial,
   getPurchasedMaterials,
+  getRawMaterials,
   updatePurchasedMaterial
 } from '../services/db';
 import {
@@ -34,6 +35,8 @@ const emptyForm: MaterialForm = {
 export const PurchasedMaterials: React.FC = () => {
   const { confirm } = useTranslation();
   const [materials, setMaterials] = useState<PurchasedMaterial[]>([]);
+  const [savedMaterialNames, setSavedMaterialNames] = useState<string[]>([]);
+  const [savedSuppliers, setSavedSuppliers] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState<MaterialForm>(emptyForm);
   const [editingMaterial, setEditingMaterial] = useState<PurchasedMaterial | null>(null);
@@ -45,7 +48,19 @@ export const PurchasedMaterials: React.FC = () => {
   const loadMaterials = async () => {
     setLoading(true);
     try {
-      setMaterials(await getPurchasedMaterials());
+      const [purchasedMaterials, rawMaterials] = await Promise.all([
+        getPurchasedMaterials(),
+        getRawMaterials()
+      ]);
+      setMaterials(purchasedMaterials);
+      setSavedMaterialNames(Array.from(new Set([
+        ...rawMaterials.map((material) => material.name.trim()),
+        ...purchasedMaterials.map((material) => material.materialName.trim())
+      ].filter(Boolean))).sort());
+      setSavedSuppliers(Array.from(new Set([
+        ...rawMaterials.map((material) => material.supplier.trim()),
+        ...purchasedMaterials.map((material) => material.supplier.trim())
+      ].filter(Boolean))).sort());
     } catch (loadError) {
       console.error(loadError);
       setError('Could not load purchased materials.');
@@ -206,8 +221,8 @@ export const PurchasedMaterials: React.FC = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{error}</div>}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div><label className="form-label">Material Name</label><input required className="form-input" value={form.materialName} onChange={(e) => updateForm('materialName', e.target.value)} /></div>
-              <div><label className="form-label">Supplier</label><input required className="form-input" value={form.supplier} onChange={(e) => updateForm('supplier', e.target.value)} /></div>
+              <div><label className="form-label">Material Name</label><input required list="purchased-material-names" className="form-input" placeholder="Select or enter material name" value={form.materialName} onChange={(e) => updateForm('materialName', e.target.value)} /><datalist id="purchased-material-names">{savedMaterialNames.map((name) => <option key={name} value={name} />)}</datalist></div>
+              <div><label className="form-label">Supplier</label><input required list="purchased-material-suppliers" className="form-input" placeholder="Select or enter supplier" value={form.supplier} onChange={(e) => updateForm('supplier', e.target.value)} /><datalist id="purchased-material-suppliers">{savedSuppliers.map((supplier) => <option key={supplier} value={supplier} />)}</datalist></div>
               <div><label className="form-label">Bag Quantity</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.numberOfBags} onChange={(e) => updateForm('numberOfBags', e.target.value)} /></div>
               <div><label className="form-label">Weight per Bag (kg)</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.weightPerBagKg} onChange={(e) => updateForm('weightPerBagKg', e.target.value)} /></div>
               <div><label className="form-label">Weight per Piece (g)</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.weightPerPieceGrams} onChange={(e) => updateForm('weightPerPieceGrams', e.target.value)} /></div>
