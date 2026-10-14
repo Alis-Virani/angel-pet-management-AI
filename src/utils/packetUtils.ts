@@ -117,6 +117,16 @@ export function calculatePacketsFromQuantity(quantity: number, unitsPerPacket: n
   return Number.isInteger(count) ? count : Math.round(count * 10000) / 10000;
 }
 
+export function calculateTotalWeightKg(numberOfBags: number, weightPerBagKg: number): number {
+  if (!isPositiveNumber(numberOfBags) || !isPositiveNumber(weightPerBagKg)) return 0;
+  return Math.round(numberOfBags * weightPerBagKg * 10000) / 10000;
+}
+
+export function calculateEquivalentPieces(totalWeightKg: number, weightPerPieceGrams: number): number {
+  if (!isPositiveNumber(totalWeightKg) || !isPositiveNumber(weightPerPieceGrams)) return 0;
+  return Math.round((totalWeightKg * 1000 / weightPerPieceGrams) * 10000) / 10000;
+}
+
 export function formatPacketBreakdown(quantity: number, unitsPerPacket: number) {
   if (!quantity || !unitsPerPacket) {
     return { packets: 0, fullPackets: 0, remainderUnits: 0, displayText: '0 Packets' };

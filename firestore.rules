@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /customers/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /dispatches/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /documents/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /expenses/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /finishedGoodsLogs/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /orders/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /payments/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /products/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /purchasedMaterials/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /purchases/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /rawMaterials/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /rawMaterialUsage/{document} {
+      allow read, write: if isSignedIn();
+    }
+    match /settings/{document} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

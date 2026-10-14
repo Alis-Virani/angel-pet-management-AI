@@ -201,6 +201,19 @@ export interface RawMaterial {
   lastRestocked: string;
 }
 
+export interface PurchasedMaterial {
+  id: string;
+  materialName: string;
+  supplier: string;
+  numberOfBags: number;
+  weightPerBagKg: number;
+  totalWeightKg: number;
+  weightPerPieceGrams: number;
+  equivalentPieces: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface RawMaterialUsage {
   id: string;
   materialId: string;

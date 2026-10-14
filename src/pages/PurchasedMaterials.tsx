@@ -1,0 +1,222 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { PurchasedMaterial } from '../types';
+import {
+  addPurchasedMaterial,
+  deletePurchasedMaterial,
+  getPurchasedMaterials,
+  updatePurchasedMaterial
+} from '../services/db';
+import {
+  calculateEquivalentPieces,
+  calculateTotalWeightKg,
+  cleanDecimalInput,
+  formatNumberDisplay
+} from '../utils/packetUtils';
+import { useTranslation } from '../i18n';
+
+type MaterialForm = {
+  materialName: string;
+  supplier: string;
+  numberOfBags: string;
+  weightPerBagKg: string;
+  weightPerPieceGrams: string;
+};
+
+const emptyForm: MaterialForm = {
+  materialName: '',
+  supplier: '',
+  numberOfBags: '',
+  weightPerBagKg: '',
+  weightPerPieceGrams: ''
+};
+
+export const PurchasedMaterials: React.FC = () => {
+  const { confirm } = useTranslation();
+  const [materials, setMaterials] = useState<PurchasedMaterial[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [form, setForm] = useState<MaterialForm>(emptyForm);
+  const [editingMaterial, setEditingMaterial] = useState<PurchasedMaterial | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const loadMaterials = async () => {
+    setLoading(true);
+    try {
+      setMaterials(await getPurchasedMaterials());
+    } catch (loadError) {
+      console.error(loadError);
+      setError('Could not load purchased materials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadMaterials();
+  }, []);
+
+  const filteredMaterials = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return materials;
+    return materials.filter((material) =>
+      [material.materialName, material.supplier].some((value) => value.toLowerCase().includes(query))
+    );
+  }, [materials, searchQuery]);
+
+  const totalWeightKg = calculateTotalWeightKg(
+    Number(form.numberOfBags),
+    Number(form.weightPerBagKg)
+  );
+  const equivalentPieces = calculateEquivalentPieces(
+    totalWeightKg,
+    Number(form.weightPerPieceGrams)
+  );
+
+  const openForm = (material?: PurchasedMaterial) => {
+    setEditingMaterial(material || null);
+    setForm(material ? {
+      materialName: material.materialName,
+      supplier: material.supplier,
+      numberOfBags: String(material.numberOfBags),
+      weightPerBagKg: String(material.weightPerBagKg),
+      weightPerPieceGrams: String(material.weightPerPieceGrams)
+    } : emptyForm);
+    setError('');
+    setIsFormOpen(true);
+  };
+
+  const closeForm = () => {
+    if (!saving) setIsFormOpen(false);
+  };
+
+  const updateForm = (field: keyof MaterialForm, value: string) => {
+    setForm((current) => ({ ...current, [field]: field === 'materialName' || field === 'supplier' ? value : cleanDecimalInput(value) }));
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const bags = Number(form.numberOfBags);
+    const bagWeight = Number(form.weightPerBagKg);
+    const pieceWeight = Number(form.weightPerPieceGrams);
+
+    if (!form.materialName.trim() || !form.supplier.trim()) {
+      setError('Material name and supplier are required.');
+      return;
+    }
+    if (![bags, bagWeight, pieceWeight].every((value) => Number.isFinite(value) && value > 0)) {
+      setError('Bag quantity and weights must be positive numbers.');
+      return;
+    }
+
+    const payload = {
+      materialName: form.materialName.trim(),
+      supplier: form.supplier.trim(),
+      numberOfBags: bags,
+      weightPerBagKg: bagWeight,
+      totalWeightKg: calculateTotalWeightKg(bags, bagWeight),
+      weightPerPieceGrams: pieceWeight,
+      equivalentPieces: calculateEquivalentPieces(calculateTotalWeightKg(bags, bagWeight), pieceWeight)
+    };
+
+    setSaving(true);
+    setError('');
+    try {
+      if (editingMaterial) await updatePurchasedMaterial(editingMaterial.id, payload);
+      else await addPurchasedMaterial(payload);
+      setIsFormOpen(false);
+      await loadMaterials();
+    } catch (saveError) {
+      console.error(saveError);
+      setError('Could not save purchased material.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (material: PurchasedMaterial) => {
+    if (!confirm(`Delete purchased material "${material.materialName}"?`)) return;
+    try {
+      await deletePurchasedMaterial(material.id);
+      await loadMaterials();
+    } catch (deleteError) {
+      console.error(deleteError);
+      setError('Could not delete purchased material.');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Purchased Materials</h1>
+          <p className="mt-0.5 text-xs font-medium text-slate-500">Track raw material purchases, stock weight, and equivalent pieces.</p>
+        </div>
+        <button onClick={() => openForm()} className="btn-primary">
+          <Plus className="h-4 w-4" /> Add Purchased Material
+        </button>
+      </div>
+
+      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">{error}</div>}
+
+      <div className="space-y-4 rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Material Stock</h2>
+            <p className="text-xs text-slate-500">Calculated values update when a record is saved.</p>
+          </div>
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input className="form-input pl-9" placeholder="Search material or supplier..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] border-collapse text-left">
+            <thead><tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <th className="px-4 py-3.5">Material</th><th className="px-4 py-3.5">Supplier</th><th className="px-4 py-3.5">Bags</th>
+              <th className="px-4 py-3.5">Weight / Bag</th><th className="px-4 py-3.5">Total Weight</th><th className="px-4 py-3.5">Weight / Piece</th>
+              <th className="px-4 py-3.5">Equivalent Pieces</th><th className="px-4 py-3.5 text-right">Actions</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+              {loading ? <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">Loading purchased materials...</td></tr> :
+                filteredMaterials.length === 0 ? <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">No purchased materials found.</td></tr> :
+                filteredMaterials.map((material) => <tr key={material.id} className="transition-colors hover:bg-slate-50/80">
+                  <td className="px-4 py-3.5 font-bold text-slate-900">{material.materialName}</td>
+                  <td className="px-4 py-3.5">{material.supplier}</td>
+                  <td className="px-4 py-3.5">{formatNumberDisplay(material.numberOfBags)} bags</td>
+                  <td className="px-4 py-3.5">{formatNumberDisplay(material.weightPerBagKg)} kg</td>
+                  <td className="px-4 py-3.5 font-bold text-blue-700">{formatNumberDisplay(material.totalWeightKg)} kg</td>
+                  <td className="px-4 py-3.5">{formatNumberDisplay(material.weightPerPieceGrams)} g</td>
+                  <td className="px-4 py-3.5 font-bold text-emerald-700">{formatNumberDisplay(material.equivalentPieces)} pcs</td>
+                  <td className="px-4 py-3.5"><div className="flex justify-end gap-1">
+                    <button title="Edit purchased material" onClick={() => openForm(material)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Pencil className="h-4 w-4" /></button>
+                    <button title="Delete purchased material" onClick={() => handleDelete(material)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                  </div></td>
+                </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {isFormOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+          <div className="mb-5 flex items-start justify-between"><div><h2 className="text-lg font-bold text-slate-900">{editingMaterial ? 'Edit' : 'Add'} Purchased Material</h2><p className="text-xs text-slate-500">Enter positive decimal quantities and weights.</p></div><button onClick={closeForm} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{error}</div>}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div><label className="form-label">Material Name</label><input required className="form-input" value={form.materialName} onChange={(e) => updateForm('materialName', e.target.value)} /></div>
+              <div><label className="form-label">Supplier</label><input required className="form-input" value={form.supplier} onChange={(e) => updateForm('supplier', e.target.value)} /></div>
+              <div><label className="form-label">Bag Quantity</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.numberOfBags} onChange={(e) => updateForm('numberOfBags', e.target.value)} /></div>
+              <div><label className="form-label">Weight per Bag (kg)</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.weightPerBagKg} onChange={(e) => updateForm('weightPerBagKg', e.target.value)} /></div>
+              <div><label className="form-label">Weight per Piece (g)</label><input required min="0.0001" step="any" type="number" className="form-input" value={form.weightPerPieceGrams} onChange={(e) => updateForm('weightPerPieceGrams', e.target.value)} /></div>
+              <div className="rounded-xl bg-slate-50 p-3"><div className="text-[11px] font-bold uppercase text-slate-400">Calculated Total Weight</div><div className="mt-1 text-lg font-bold text-blue-700">{formatNumberDisplay(totalWeightKg)} kg</div><div className="text-[11px] text-slate-500">Equivalent pieces: {formatNumberDisplay(equivalentPieces)}</div></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={closeForm} className="btn-secondary">Cancel</button><button disabled={saving} type="submit" className="btn-primary">{saving ? 'Saving...' : 'Save Material'}</button></div>
+          </form>
+        </div>
+      </div>}
+    </div>
+  );
+};

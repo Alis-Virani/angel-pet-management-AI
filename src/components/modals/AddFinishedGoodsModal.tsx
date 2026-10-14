@@ -18,7 +18,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [productType, setProductType] = useState<ProductType>('bottle');
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [quantityProduced, setQuantityProduced] = useState<number>(5000);
+  const [quantityProduced, setQuantityProduced] = useState<number | ''>('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
@@ -57,7 +57,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       setError('Please select a product.');
       return;
     }
-    if (quantityProduced <= 0) {
+    if (typeof quantityProduced !== 'number' || !Number.isFinite(quantityProduced) || quantityProduced <= 0) {
       setError('Quantity produced must be greater than 0.');
       return;
     }
@@ -145,8 +145,9 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
               type="number"
               min={1}
               required
+              placeholder="Enter quantity produced"
               value={quantityProduced}
-              onChange={(e) => setQuantityProduced(parseInt(e.target.value) || 0)}
+              onChange={(e) => setQuantityProduced(e.target.value === '' ? '' : Number(e.target.value))}
               className="form-input font-bold"
             />
           </div>

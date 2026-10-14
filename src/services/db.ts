@@ -9,7 +9,7 @@ import {
   , deleteField
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage, isLiveFirebaseConfigured } from '../firebase/config';
+import { db, storage, isLiveFirebaseConfigured, firebaseReady } from '../firebase/config';
 
 // Helper to check if Firebase sync should be attempted
 const shouldSyncToFirebase = (): boolean => {
@@ -38,6 +38,7 @@ import type {
   PurchaseStatus,
   PurchasePaymentStatus,
   PurchasePayment
+  , PurchasedMaterial
   , SignedOrderCopy
 } from '../types';
 import {
@@ -70,6 +71,7 @@ const STORAGE_KEYS = {
   DOCUMENTS: 'angel_pet_documents',
   SETTINGS: 'angel_pet_settings',
   PURCHASES: 'angel_pet_purchases',
+  PURCHASED_MATERIALS: 'angel_pet_purchased_materials',
   INITIALIZED: 'angel_pet_seed_initialized_v3'
 };
 
@@ -151,6 +153,7 @@ function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
 
 // Ensure database is seeded with initial data on first load
 export async function seedDatabase(force = false): Promise<void> {
+  await firebaseReady;
   const isAlreadyInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
 
   if (isLiveFirebaseConfigured && db) {
@@ -1143,6 +1146,71 @@ export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>)
   }
 
   return newUsage;
+}
+
+// ================= PURCHASED MATERIALS =================
+export async function getPurchasedMaterials(): Promise<PurchasedMaterial[]> {
+  const localItems = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
+  if (isLiveFirebaseConfigured && db) {
+    try {
+      const snap = await withTimeout(getDocs(collection(getDb(), 'purchasedMaterials')), 2000);
+      if (snap && snap.docs.length > 0) {
+        const remoteItems = snap.docs.map((d) => d.data() as PurchasedMaterial);
+        const merged = mergeLocalAndRemote(localItems, remoteItems);
+        setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Firebase getPurchasedMaterials failed or timed out, falling back to LocalStorage:', e);
+    }
+  }
+  return localItems;
+}
+
+export async function addPurchasedMaterial(
+  data: Omit<PurchasedMaterial, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<PurchasedMaterial> {
+  const id = `PM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const now = new Date().toISOString();
+  const newMaterial: PurchasedMaterial = { ...data, id, createdAt: now };
+  const list = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
+  setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, [newMaterial, ...list]);
+
+  if (shouldSyncToFirebase()) {
+    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), sanitizeForFirestore(newMaterial)), 2500).catch((e) =>
+      console.error('Error adding purchased material to Firebase:', e)
+    );
+  }
+  return newMaterial;
+}
+
+export async function updatePurchasedMaterial(
+  id: string,
+  updates: Partial<Omit<PurchasedMaterial, 'id' | 'createdAt'>>
+): Promise<PurchasedMaterial> {
+  const list = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
+  const existing = list.find((item) => item.id === id);
+  if (!existing) throw new Error('Purchased material not found');
+  const updated: PurchasedMaterial = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+  setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, list.map((item) => item.id === id ? updated : item));
+
+  if (shouldSyncToFirebase()) {
+    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), sanitizeForFirestore(updated), { merge: true }), 2500).catch((e) =>
+      console.error('Error updating purchased material in Firebase:', e)
+    );
+  }
+  return updated;
+}
+
+export async function deletePurchasedMaterial(id: string): Promise<void> {
+  const list = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
+  setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, list.filter((item) => item.id !== id));
+
+  if (shouldSyncToFirebase()) {
+    withTimeout(deleteDoc(doc(getDb(), 'purchasedMaterials', id)), 2500).catch((e) =>
+      console.error('Error deleting purchased material in Firebase:', e)
+    );
+  }
 }
 
 // ================= PURCHASES =================

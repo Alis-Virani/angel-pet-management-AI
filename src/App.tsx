@@ -11,6 +11,7 @@ import { ProductDirectory } from './pages/ProductDirectory';
 import { FinishedGoods } from './pages/FinishedGoods';
 import { RawMaterials } from './pages/RawMaterials';
 import { Purchases } from './pages/Purchases';
+import { PurchasedMaterials } from './pages/PurchasedMaterials';
 import { PurchaseDetails } from './pages/PurchaseDetails';
 import { Finance } from './pages/Finance';
 import { DispatchPage } from './pages/Dispatch';
@@ -205,6 +206,7 @@ export function App() {
               />
             }
           />
+          <Route path="/purchased-materials" element={<PurchasedMaterials key={`pm-${refreshKey}`} />} />
           <Route
             path="/raw-materials"
             element={

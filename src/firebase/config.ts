@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -36,13 +37,23 @@ export const isLiveFirebaseConfigured = Boolean(
 let app;
 let db: ReturnType<typeof getFirestore> | null = null;
 let storage: ReturnType<typeof getStorage> | null = null;
+let auth: ReturnType<typeof getAuth> | null = null;
+
+export let firebaseReady: Promise<void> = Promise.resolve();
 
 if (isLiveFirebaseConfigured) {
   try {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    auth = getAuth(app);
     db = getFirestore(app);
     storage = getStorage(app);
-    console.info('Firebase Firestore and Storage initialized successfully (No Auth mode)');
+    firebaseReady = signInAnonymously(auth)
+      .then(() => {
+        console.info('Firebase Firestore and Storage initialized with authenticated access');
+      })
+      .catch((error) => {
+        console.warn('Firebase anonymous authentication failed; using LocalStorage fallback:', error);
+      });
   } catch (error) {
     console.warn('Firebase initialization warning:', error);
   }
@@ -50,4 +61,4 @@ if (isLiveFirebaseConfigured) {
   console.info('Using Client LocalStorage DB mode (No live Firebase keys found in VITE_FIREBASE_*)');
 }
 
-export { db, storage };
+export { auth, db, storage };

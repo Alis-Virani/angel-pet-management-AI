@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   ShoppingCart,
   ShoppingBag,
+  Warehouse,
   Users,
   BarChart3,
   Package,
@@ -31,6 +32,7 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/sales', label: 'Sales & Orders', icon: ShoppingCart },
   { path: '/purchases', label: 'Purchases', icon: ShoppingBag },
+  { path: '/purchased-materials', label: 'Purchased Materials', icon: Warehouse },
   { path: '/customers', label: 'Customers', icon: Users },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/products', label: 'Product Directory', icon: Package },
@@ -145,4 +147,3 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
-
