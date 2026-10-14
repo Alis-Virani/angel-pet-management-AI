@@ -327,7 +327,8 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
             const unitsPerPacket = getProductUnitsPerPacket(product) || (isPositiveInteger(item.savedUnitsPerPacket) ? item.savedUnitsPerPacket : undefined);
             const canSellByPacket = Boolean(unitsPerPacket);
             const sellByPacket = Boolean(item.sellByPacket && unitsPerPacket);
-            const packetCount = item.packetCount === '' ? 0 : item.packetCount;
+            const parsedPacketCount = item.packetCount === '' ? 0 : Number(item.packetCount);
+            const packetCount = Number.isFinite(parsedPacketCount) ? parsedPacketCount : 0;
             const quantity = sellByPacket && unitsPerPacket
               ? calculatePacketUnits(packetCount, unitsPerPacket)
               : (item.quantity === '' ? 0 : Number(item.quantity));
@@ -600,4 +601,3 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
     </Modal>
   );
 };
-
