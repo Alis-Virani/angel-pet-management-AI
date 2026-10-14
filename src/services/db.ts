@@ -135,6 +135,20 @@ function mergeLocalAndRemote<T extends { id: string }>(localList: T[], remoteLis
   return merged;
 }
 
+function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
+  const localMap = new Map(localList.map((item) => [item.id, item]));
+  const merged = remoteList.map((remoteItem) => ({
+    ...localMap.get(remoteItem.id),
+    ...remoteItem
+  }));
+  const remoteIds = new Set(remoteList.map((item) => item.id));
+
+  return [
+    ...merged,
+    ...localList.filter((localItem) => !remoteIds.has(localItem.id))
+  ];
+}
+
 // Ensure database is seeded with initial data on first load
 export async function seedDatabase(force = false): Promise<void> {
   const isAlreadyInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
@@ -348,7 +362,7 @@ export async function getProducts(): Promise<Product[]> {
       const snap = await withTimeout(getDocs(collection(getDb(), 'products')), 2000);
       if (snap && snap.docs.length > 0) {
         const remoteItems = snap.docs.map((d) => d.data() as Product);
-        const merged = mergeLocalAndRemote(mergedWithInitial, remoteItems);
+        const merged = mergeProducts(mergedWithInitial, remoteItems);
         setLocalItem(STORAGE_KEYS.PRODUCTS, merged);
         return merged;
       }

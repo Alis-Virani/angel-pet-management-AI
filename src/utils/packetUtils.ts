@@ -98,7 +98,10 @@ export function canProductUseFractionalPackets(product?: Pick<Product, 'allowFra
 }
 
 export function getProductUnitsPerPacket(product?: Pick<Product, 'unitsPerPacket'> | null): number | undefined {
-  return isPositiveInteger(product?.unitsPerPacket) ? product.unitsPerPacket : undefined;
+  if (!isPositiveInteger(product?.unitsPerPacket)) return undefined;
+  return typeof product.unitsPerPacket === 'number'
+    ? product.unitsPerPacket
+    : Number(product.unitsPerPacket);
 }
 
 export function calculatePacketUnits(packetCount: number, unitsPerPacket: number): number {
