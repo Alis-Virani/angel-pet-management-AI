@@ -205,6 +205,10 @@ export interface PurchasedMaterial {
   id: string;
   materialName: string;
   supplier: string;
+  conversionMode?: 'pieces' | 'packets';
+  packetQuantity?: number;
+  unitsPerPacket?: number;
+  totalPieces?: number;
   numberOfBags: number;
   weightPerBagKg: number;
   totalWeightKg: number;

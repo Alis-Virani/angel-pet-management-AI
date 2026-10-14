@@ -1192,10 +1192,19 @@ export async function updatePurchasedMaterial(
   const existing = list.find((item) => item.id === id);
   if (!existing) throw new Error('Purchased material not found');
   const updated: PurchasedMaterial = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+  if (updates.conversionMode === 'pieces') {
+    delete updated.packetQuantity;
+    delete updated.unitsPerPacket;
+  }
   setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, list.map((item) => item.id === id ? updated : item));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), sanitizeForFirestore(updated), { merge: true }), 2500).catch((e) =>
+    const firebaseUpdates: Record<string, unknown> = sanitizeForFirestore(updated);
+    if (updates.conversionMode === 'pieces') {
+      firebaseUpdates.packetQuantity = deleteField();
+      firebaseUpdates.unitsPerPacket = deleteField();
+    }
+    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), firebaseUpdates, { merge: true }), 2500).catch((e) =>
       console.error('Error updating purchased material in Firebase:', e)
     );
   }

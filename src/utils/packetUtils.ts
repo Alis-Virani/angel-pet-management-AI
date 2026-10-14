@@ -127,6 +127,16 @@ export function calculateEquivalentPieces(totalWeightKg: number, weightPerPieceG
   return Math.round((totalWeightKg * 1000 / weightPerPieceGrams) * 10000) / 10000;
 }
 
+export function calculatePiecesFromPackets(packetQuantity: number, unitsPerPacket: number): number {
+  if (!isPositiveNumber(packetQuantity) || !isPositiveInteger(unitsPerPacket)) return 0;
+  return Math.round(packetQuantity * unitsPerPacket * 10000) / 10000;
+}
+
+export function calculateWeightFromPieces(totalPieces: number, weightPerPieceGrams: number): number {
+  if (!isPositiveNumber(totalPieces) || !isPositiveNumber(weightPerPieceGrams)) return 0;
+  return Math.round((totalPieces * weightPerPieceGrams / 1000) * 10000) / 10000;
+}
+
 export function formatPacketBreakdown(quantity: number, unitsPerPacket: number) {
   if (!quantity || !unitsPerPacket) {
     return { packets: 0, fullPackets: 0, remainderUnits: 0, displayText: '0 Packets' };
