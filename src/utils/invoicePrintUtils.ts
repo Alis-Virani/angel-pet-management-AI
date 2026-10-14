@@ -1,6 +1,7 @@
 import { Order, OrderItem, Customer, Settings, Product } from '../types';
 import { formatPackagingMode } from './packagingUtils';
 import { formatWeight, getWeightInGrams } from './weightUtils';
+import { formatNumberDisplay } from './packetUtils';
 
 // ── Number-to-words helper (Indian numbering) ─────────────────────────────────
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
@@ -288,9 +289,9 @@ export function generateInvoiceHtml(
 
       const qtyDisplay =
         item.soldByPacket && item.packetCount && item.unitsPerPacket
-          ? `<div>${item.packetCount.toLocaleString('en-IN')} Packets</div>
-             <div style="font-size: 8px; color: #64748b; font-weight: 500; margin-top: 1px;">(${item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt &bull; Total: ${quantity.toLocaleString('en-IN')} pcs)</div>`
-          : `${quantity.toLocaleString('en-IN')} pcs`;
+          ? `<div>${formatNumberDisplay(item.packetCount)} ${item.packetCount === 1 ? 'Packet' : 'Packets'}</div>
+             <div style="font-size: 8px; color: #64748b; font-weight: 500; margin-top: 1px;">(${item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt &bull; Total: ${formatNumberDisplay(quantity)} pcs)</div>`
+          : `${formatNumberDisplay(quantity)} pcs`;
 
       const hasInner = Boolean(item.selectedInnerName || item.selectedInnerId);
       const hasCap = Boolean(item.selectedCapName || item.selectedCapId);
@@ -483,7 +484,7 @@ export function generateInvoiceHtml(
           <!-- Left: notes, logistics & terms -->
           <td style="vertical-align: top; width: 50%; padding-right: 16px;">
             <div style="font-size: 9px; color: #475569; line-height: 1.5; margin-bottom: 6px;">
-              <div><strong>Total Quantity:</strong> ${totalPieces.toLocaleString('en-IN')} pcs</div>
+              <div><strong>Total Quantity:</strong> ${formatNumberDisplay(totalPieces)} pcs</div>
               ${hasAnyWeightInOrder && totalOrderWeightDisplay ? `
                 <div style="margin-top: 1px;"><strong>Total Weight:</strong> ${totalOrderWeightDisplay}</div>
               ` : ''}

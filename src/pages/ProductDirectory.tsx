@@ -366,7 +366,16 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
                     {typeof p.unitsPerPacket === 'number' && p.unitsPerPacket > 0 && (
                       <div className="col-span-2">
                         <span className="text-slate-400 font-medium text-[10px] block">Units per Packet</span>
-                        <span className="font-semibold text-slate-800">{p.unitsPerPacket.toLocaleString()} units</span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="font-semibold text-slate-800">{p.unitsPerPacket.toLocaleString()} units</span>
+                          <span className={`text-[9.5px] px-1.5 py-0.5 rounded-full font-bold ${
+                            p.allowFractionalPackets === false
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          }`}>
+                            {p.allowFractionalPackets === false ? 'Whole pkts only' : 'Fractional pkts allowed'}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>

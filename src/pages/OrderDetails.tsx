@@ -8,6 +8,7 @@ import { isPakkaBill, amountInWords, formatInvoiceDate, expandComboItems } from 
 import { formatPackagingMode } from '../utils/packagingUtils';
 import { formatWeight, getWeightInGrams } from '../utils/weightUtils';
 import { getOrderDeliveryProgress } from '../utils/dispatchUtils';
+import { formatNumberDisplay } from '../utils/packetUtils';
 import {
   ArrowLeft,
   Printer,

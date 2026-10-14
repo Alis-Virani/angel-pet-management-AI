@@ -36,6 +36,7 @@ export interface Product {
   minimumStock: number;
   unit: string; // 'pcs', 'units', etc.
   unitsPerPacket?: number; // optional; positive whole units in one packet/box
+  allowFractionalPackets?: boolean; // optional; whether decimal packets (e.g. 2.5 pkts) make business sense; if false, packets must be whole
   status: ProductStatus;
   createdAt: string;
   imageUrl?: string;
@@ -66,10 +67,10 @@ export interface OrderItem {
   productType: ProductType;
   priceCategory: PriceCategory;
   unitPrice: number;
-  quantity: number; // always total individual units
+  quantity: number; // always total individual units (can be decimal)
   subtotal: number;
   soldByPacket?: boolean;
-  packetCount?: number;
+  packetCount?: number; // can be decimal for fractional packets
   unitsPerPacket?: number;
   // Packaging & combo fields
   selectedInnerId?: string; // ID of the selected inner product

@@ -3,7 +3,7 @@ import { Order, OrderItem, PackagingMode, PriceCategory, Product } from '../../t
 import { getProducts, updateOrder } from '../../services/db';
 import { Modal } from '../common/Modal';
 import { AlertCircle, Link2, Package, Plus, Save, Trash2, Layers } from 'lucide-react';
-import { calculatePacketUnits, getProductUnitsPerPacket, isPositiveInteger, parsePositiveInteger } from '../../utils/packetUtils';
+import { calculatePacketUnits, getProductUnitsPerPacket, isPositiveInteger, parsePositiveInteger, isPositiveNumber, cleanDecimalInput, formatNumberDisplay, canProductUseFractionalPackets, calculatePacketsFromQuantity } from '../../utils/packetUtils';
 import { getProductPriceForCategory, isValidProductPrice, calculateEffectiveItemRate, getBottleComboPrice } from '../../utils/pricingUtils';
 import { formatPackagingMode } from '../../utils/packagingUtils';
 import { formatWeight, formatPieceWeight, calculateItemWeightGrams, calculateOrderTotalWeightGrams } from '../../utils/weightUtils';
@@ -19,9 +19,9 @@ interface DraftItem {
   id: string;
   productId: string;
   priceCategory: PriceCategory;
-  quantity: number | '';
+  quantity: number | string;
   sellByPacket: boolean;
-  packetCount: number | '';
+  packetCount: number | string;
   savedUnitsPerPacket?: number;
   initialProductId?: string;
   initialPriceCategory?: PriceCategory;
@@ -122,19 +122,20 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
   };
 
   const handleQuantityChange = (id: string, value: string) => {
-    const newQuantity = parsePositiveInteger(value);
-    updateItem(id, { quantity: newQuantity });
+    const cleaned = cleanDecimalInput(value);
+    updateItem(id, { quantity: cleaned });
   };
 
   const handlePacketCountChange = (id: string, value: string) => {
-    const newPacketCount = parsePositiveInteger(value);
-    updateItem(id, { packetCount: newPacketCount });
+    const cleaned = cleanDecimalInput(value);
+    updateItem(id, { packetCount: cleaned });
   };
 
   const handleSellByPacketToggle = (id: string, enabled: boolean, unitsPerPacket?: number) => {
+    const current = items.find((item) => item.id === id);
+    const product = products.find((candidate) => candidate.id === current?.productId);
     if (!enabled || !unitsPerPacket) {
-      const current = items.find((item) => item.id === id);
-      const packetCount = current?.packetCount === '' || current?.packetCount == null ? 0 : current.packetCount;
+      const packetCount = current?.packetCount === '' || current?.packetCount == null || isNaN(Number(current.packetCount)) ? 0 : Number(current.packetCount);
       const derivedQuantity = current?.sellByPacket && unitsPerPacket
         ? calculatePacketUnits(packetCount, unitsPerPacket)
         : (current?.quantity === '' || current?.quantity == null ? 1 : current.quantity);
@@ -142,11 +143,16 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
       updateItem(id, { sellByPacket: false, quantity: finalQty });
       return;
     }
-    const current = items.find((item) => item.id === id);
-    const currentQty = current?.quantity === '' || current?.quantity == null ? 0 : current.quantity;
-    const packetCount = currentQty > 0 && currentQty % unitsPerPacket === 0
-      ? currentQty / unitsPerPacket
-      : 1;
+    const currentQty = current?.quantity === '' || current?.quantity == null || isNaN(Number(current.quantity)) ? 0 : Number(current.quantity);
+    let packetCount: number | string = 1;
+    if (currentQty > 0) {
+      const calculated = calculatePacketsFromQuantity(currentQty, unitsPerPacket);
+      if (!canProductUseFractionalPackets(product)) {
+        packetCount = Math.max(1, Math.round(calculated));
+      } else {
+        packetCount = calculated;
+      }
+    }
     updateItem(id, { sellByPacket: true, packetCount });
   };
 
@@ -161,10 +167,11 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
 
     const unitsPerPacket = getProductUnitsPerPacket(product) || (isPositiveInteger(item.savedUnitsPerPacket) ? item.savedUnitsPerPacket : undefined);
     const sellByPacket = Boolean(item.sellByPacket && unitsPerPacket);
-    const packetCount = item.packetCount === '' ? 0 : item.packetCount;
+    const packetCount = item.packetCount === '' || isNaN(Number(item.packetCount)) ? 0 : Number(item.packetCount);
+    const rawQty = item.quantity === '' || isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
     const quantity = sellByPacket && unitsPerPacket
       ? calculatePacketUnits(packetCount, unitsPerPacket)
-      : (item.quantity === '' ? 0 : Number(item.quantity));
+      : rawQty;
     const calculatedUnitPrice = getItemUnitPrice(item, products);
     const unitPrice = calculatedUnitPrice ?? 0;
     const isCombo = Boolean(product?.type === 'bottle' && (innerProduct || capProduct));
@@ -238,15 +245,26 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
       return;
     }
 
-    if (items.some((item) => {
+    const invalidQuantityItem = items.find((item) => {
       const product = products.find((candidate) => candidate.id === item.productId);
       const unitsPerPacket = getProductUnitsPerPacket(product) || (isPositiveInteger(item.savedUnitsPerPacket) ? item.savedUnitsPerPacket : undefined);
       if (item.sellByPacket && unitsPerPacket) {
-        return !isPositiveInteger(item.packetCount);
+        if (!canProductUseFractionalPackets(product)) {
+          return !isPositiveInteger(item.packetCount);
+        }
+        return !isPositiveNumber(item.packetCount);
       }
-      return item.quantity === '' || !isPositiveInteger(item.quantity);
-    })) {
-      setError('Please enter a positive whole quantity. For packet selling, Number of Packets must be a positive whole number.');
+      return item.quantity === '' || !isPositiveNumber(item.quantity);
+    });
+
+    if (invalidQuantityItem) {
+      const product = products.find((candidate) => candidate.id === invalidQuantityItem.productId);
+      const unitsPerPacket = getProductUnitsPerPacket(product) || (isPositiveInteger(invalidQuantityItem.savedUnitsPerPacket) ? invalidQuantityItem.savedUnitsPerPacket : undefined);
+      if (invalidQuantityItem.sellByPacket && unitsPerPacket && !canProductUseFractionalPackets(product)) {
+        setError(`Product "${product?.name || 'Selected product'}" requires whole packets (e.g. 1, 2, 3). For decimal quantities, please disable Sell by Packet.`);
+      } else {
+        setError('Please enter a valid positive quantity. For packet selling, Number of Packets must be a positive number.');
+      }
       return;
     }
 
@@ -361,13 +379,13 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">Quantity</label>
                     {sellByPacket ? (
                       <div className="px-3 py-2 bg-white text-xs font-semibold text-slate-800 rounded-xl border border-slate-200 min-h-[36px] flex items-center justify-end">
-                        {quantity.toLocaleString('en-IN')}
+                        {formatNumberDisplay(quantity)}
                       </div>
                     ) : (
                       <input
                         type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
+                        inputMode="decimal"
+                        step="any"
                         value={item.quantity === '' ? '' : String(item.quantity)}
                         onChange={(e) => handleQuantityChange(item.id, e.target.value)}
                         className="w-full px-3 py-2 bg-white text-xs font-medium text-slate-800 rounded-xl border border-slate-200 min-h-[36px]"
@@ -498,11 +516,16 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">Packets</label>
                           <input
                             type="text"
-                            inputMode="numeric"
+                            inputMode="decimal"
+                            step="any"
+                            placeholder={canProductUseFractionalPackets(product) ? "e.g. 10 or 2.5" : "e.g. 10"}
                             value={item.packetCount === '' ? '' : String(item.packetCount)}
                             onChange={(e) => handlePacketCountChange(item.id, e.target.value)}
                             className="w-full px-3 py-2 bg-white text-xs font-medium text-slate-800 rounded-xl border border-slate-200"
                           />
+                          {!canProductUseFractionalPackets(product) && (
+                            <div className="text-[9px] text-amber-700 font-medium mt-0.5">Whole packets only</div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">Units/Packet</label>
@@ -513,7 +536,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">Total Units</label>
                           <div className="px-3 py-2 bg-blue-50 text-xs font-bold text-blue-700 rounded-xl border border-blue-100 min-h-[34px] flex items-center">
-                            {quantity.toLocaleString('en-IN')}
+                            {formatNumberDisplay(quantity)}
                           </div>
                         </div>
                       </>

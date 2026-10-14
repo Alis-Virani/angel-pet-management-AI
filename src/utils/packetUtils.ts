@@ -1,11 +1,25 @@
 import { OrderItem, Product } from '../types';
 
 export function isPositiveInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const num = Number(value);
+    return Number.isInteger(num) && num > 0;
+  }
+  return false;
 }
 
 export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0;
+  }
+  return false;
 }
 
 export function parsePositiveInteger(value: string): number | '' {
@@ -14,18 +28,90 @@ export function parsePositiveInteger(value: string): number | '' {
   return normalizedValue ? Number(normalizedValue) : '';
 }
 
+export function parsePositiveNumber(value: string): number | '' {
+  if (!value) return '';
+  
+  // Allow only digits and one decimal point
+  const cleaned = value.replace(/[^0-9.]/g, '');
+  
+  // Ensure only one decimal point
+  const parts = cleaned.split('.');
+  if (parts.length > 2) {
+    return '';
+  }
+  
+  const normalizedValue = parts.join('.');
+  
+  // Allow partial input like "1." or ".5" for typing
+  if (!normalizedValue || normalizedValue === '.') {
+    return '';
+  }
+  
+  const num = Number(normalizedValue);
+  
+  // If it's a valid positive number, return it
+  if (Number.isFinite(num) && num > 0) {
+    return num;
+  }
+  
+  // If it's zero or negative, return empty
+  return '';
+}
+
+/**
+ * Clean decimal input for display (allows partial input like "1." and "0.25")
+ */
+export function cleanDecimalInput(value: string): string {
+  if (!value) return '';
+  
+  // Allow only digits and one decimal point
+  const cleaned = value.replace(/[^0-9.]/g, '');
+  
+  // Ensure at most one decimal point
+  const parts = cleaned.split('.');
+  if (parts.length > 2) {
+    return parts[0] + '.' + parts.slice(1).join('');
+  }
+  
+  return cleaned;
+}
+
+/**
+ * Formats a number cleanly using Indian locale ('en-IN') without trailing zeros,
+ * preserving decimals up to maxDecimals.
+ */
+export function formatNumberDisplay(value: number | undefined | null, maxDecimals: number = 4): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '0';
+  if (Number.isInteger(value)) {
+    return value.toLocaleString('en-IN');
+  }
+  return value.toLocaleString('en-IN', { maximumFractionDigits: maxDecimals });
+}
+
+/**
+ * Checks whether fractional packets make business sense for a product.
+ * Returns true if fractional packets are allowed, false if packets must be whole.
+ */
+export function canProductUseFractionalPackets(product?: Pick<Product, 'allowFractionalPackets'> | null): boolean {
+  if (!product) return true;
+  return product.allowFractionalPackets !== false;
+}
+
 export function getProductUnitsPerPacket(product?: Pick<Product, 'unitsPerPacket'> | null): number | undefined {
   return isPositiveInteger(product?.unitsPerPacket) ? product.unitsPerPacket : undefined;
 }
 
 export function calculatePacketUnits(packetCount: number, unitsPerPacket: number): number {
-  return packetCount * unitsPerPacket;
+  if (!packetCount || !unitsPerPacket) return 0;
+  const total = packetCount * unitsPerPacket;
+  // Clean floating point arithmetic without losing precision (e.g., 2.5 * 1000 = 2500, 0.25 * 500 = 125)
+  return Math.round(total * 10000) / 10000;
 }
 
 export function calculatePacketsFromQuantity(quantity: number, unitsPerPacket: number): number {
   if (!quantity || !unitsPerPacket) return 0;
   const count = quantity / unitsPerPacket;
-  return Number.isInteger(count) ? count : Number(count.toFixed(2));
+  return Number.isInteger(count) ? count : Math.round(count * 10000) / 10000;
 }
 
 export function formatPacketBreakdown(quantity: number, unitsPerPacket: number) {
@@ -34,10 +120,15 @@ export function formatPacketBreakdown(quantity: number, unitsPerPacket: number) 
   }
   const packets = calculatePacketsFromQuantity(quantity, unitsPerPacket);
   const fullPackets = Math.floor(quantity / unitsPerPacket);
-  const remainderUnits = quantity % unitsPerPacket;
+  const remainderUnits = Math.round((quantity % unitsPerPacket) * 10000) / 10000;
+  
+  // Format display based on whether it's a whole number or decimal
+  const packetsDisplay = formatNumberDisplay(packets);
+  const looseDisplay = formatNumberDisplay(remainderUnits);
+  
   const displayText = remainderUnits === 0
-    ? `${packets.toLocaleString('en-IN')} ${packets === 1 ? 'Packet' : 'Packets'}`
-    : `${packets.toLocaleString('en-IN')} Packets (${fullPackets} pkts + ${remainderUnits} loose pcs)`;
+    ? `${packetsDisplay} ${packets === 1 ? 'Packet' : 'Packets'}`
+    : `${packetsDisplay} Packets (${fullPackets} pkts + ${looseDisplay} loose pcs)`;
 
   return { packets, fullPackets, remainderUnits, displayText };
 }

@@ -33,6 +33,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [minimumStock, setMinimumStock] = useState<number>(500);
   const [unit, setUnit] = useState('pcs');
   const [unitsPerPacket, setUnitsPerPacket] = useState('');
+  const [allowFractionalPackets, setAllowFractionalPackets] = useState(true);
   const [compatibleCapId, setCompatibleCapId] = useState('');
   const [compatibleInnerId, setCompatibleInnerId] = useState('');
   const [comboPriceA, setComboPriceA] = useState<string | number>('');
@@ -67,6 +68,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             ? String(initialProduct.unitsPerPacket)
             : ''
         );
+        setAllowFractionalPackets(initialProduct.allowFractionalPackets !== false);
         setCompatibleCapId(initialProduct.compatibleCapId || '');
         setCompatibleInnerId(initialProduct.compatibleInnerId || '');
         setComboPriceA(
@@ -105,6 +107,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         setMinimumStock(500);
         setUnit('pcs');
         setUnitsPerPacket('');
+        setAllowFractionalPackets(true);
         setCompatibleCapId('');
         setCompatibleInnerId('');
         setComboPriceA('');
@@ -200,6 +203,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           minimumStock: Number(minimumStock),
           unit,
           unitsPerPacket: parsedUnitsPerPacket,
+          allowFractionalPackets: parsedUnitsPerPacket ? allowFractionalPackets : undefined,
           ...(type === 'bottle'
             ? {
                 compatibleCapId: compatibleCapId || undefined,
@@ -232,7 +236,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           currentStock: Number(currentStock),
           minimumStock: Number(minimumStock),
           unit,
-          ...(parsedUnitsPerPacket ? { unitsPerPacket: parsedUnitsPerPacket } : {}),
+          ...(parsedUnitsPerPacket ? { unitsPerPacket: parsedUnitsPerPacket, allowFractionalPackets } : {}),
           ...(type === 'bottle'
             ? {
                 compatibleCapId: compatibleCapId || undefined,
@@ -544,6 +548,26 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               className="form-input"
             />
             <p className="text-[11px] text-slate-400 mt-1">Leave empty if this product is not sold in packets.</p>
+            {unitsPerPacket.trim() !== '' && (
+              <div className="mt-2.5 p-2.5 bg-slate-100/70 rounded-xl border border-slate-200/70">
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={allowFractionalPackets}
+                    onChange={(e) => setAllowFractionalPackets(e.target.checked)}
+                    className="mt-0.5 rounded text-blue-600 focus:ring-0"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-800">Allow Fractional Packets</span>
+                    <p className="text-[10px] text-slate-500 leading-tight mt-0.5">
+                      {allowFractionalPackets
+                        ? 'Permits decimal packet counts (e.g. 2.5 packets). In Packets mode, total pieces = packet count × units/pkt.'
+                        : 'Packets must be whole numbers (1, 2, 3...). Fractional quantities can only be ordered in Pieces mode.'}
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
         </div>
 

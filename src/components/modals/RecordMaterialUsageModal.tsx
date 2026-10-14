@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { RawMaterial } from '../../types';
 import { getRawMaterials, recordRawMaterialUsage } from '../../services/db';
-import { toBaseQuantity, validateConsumption, formatQuantityWithUnit, getStockInBothUnits, calculateEquivalentPieces } from '../../utils/unitConversion';
-import { Layers, AlertCircle } from 'lucide-react';
+import { toBaseQuantity, validateConsumption, formatQuantityWithUnit, getStockInBothUnits, calculateEquivalentPieces, calculatePiecesFromWeight, WeightToPiecesInput } from '../../utils/unitConversion';
+import { Layers, AlertCircle, Package } from 'lucide-react';
 
 interface RecordMaterialUsageModalProps {
   isOpen: boolean;
@@ -27,6 +27,13 @@ export const RecordMaterialUsageModal: React.FC<RecordMaterialUsageModalProps> =
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // Weight-to-pieces calculation fields
+  const [numberOfBags, setNumberOfBags] = useState<number>(0);
+  const [weightPerBagKg, setWeightPerBagKg] = useState<number>(0);
+  const [totalWeightKg, setTotalWeightKg] = useState<number>(0);
+  const [weightPerPieceGrams, setWeightPerPieceGrams] = useState<number>(0);
+  const [useWeightCalculation, setUseWeightCalculation] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -90,6 +97,26 @@ export const RecordMaterialUsageModal: React.FC<RecordMaterialUsageModalProps> =
   // Get stock in both units for display
   const stockDisplay = selectedMaterial ? getStockInBothUnits(selectedMaterial) : null;
 
+  // Weight-to-pieces calculation
+  const weightCalculationResult = useWeightCalculation ? calculatePiecesFromWeight({
+    numberOfBags: numberOfBags || undefined,
+    weightPerBagKg: weightPerBagKg || undefined,
+    totalWeightKg: totalWeightKg || undefined,
+    weightPerPieceGrams: weightPerPieceGrams || undefined
+  }) : { totalWeightKg: null, pieces: null, isValid: false, error: undefined };
+
+  // Auto-update quantity from weight calculation when valid
+  useEffect(() => {
+    if (useWeightCalculation && weightCalculationResult.isValid && weightCalculationResult.totalWeightKg !== null) {
+      // Convert kg to the selected unit for the quantity field
+      if (selectedUnit.toLowerCase() === 'kg') {
+        setQuantity(weightCalculationResult.totalWeightKg);
+      } else if (selectedUnit.toLowerCase() === 'g') {
+        setQuantity(weightCalculationResult.totalWeightKg * 1000);
+      }
+    }
+  }, [weightCalculationResult, useWeightCalculation, selectedUnit]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMaterial) {
@@ -130,6 +157,18 @@ export const RecordMaterialUsageModal: React.FC<RecordMaterialUsageModalProps> =
       });
 
       if (onUsageRecorded) onUsageRecorded();
+      // Reset form
+      setQuantity(100);
+      setWastage1(0);
+      setWastage2(0);
+      setProductionBatch('');
+      setNotes('');
+      setError('');
+      setNumberOfBags(0);
+      setWeightPerBagKg(0);
+      setTotalWeightKg(0);
+      setWeightPerPieceGrams(0);
+      setUseWeightCalculation(false);
       onClose();
     } catch (err) {
       console.error(err);
@@ -212,6 +251,113 @@ export const RecordMaterialUsageModal: React.FC<RecordMaterialUsageModalProps> =
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Weight-to-Pieces Calculation Section */}
+        <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 text-xs font-bold text-blue-900 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useWeightCalculation}
+                onChange={(e) => setUseWeightCalculation(e.target.checked)}
+                className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+              />
+              <Package className="w-4 h-4 text-blue-600" />
+              <span>Calculate from Weight</span>
+            </label>
+            <span className="text-[10px] font-medium text-blue-700 bg-white/80 px-2 py-0.5 rounded border border-blue-200">
+              Optional
+            </span>
+          </div>
+
+          {useWeightCalculation && (
+            <div className="space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Number of Bags</label>
+                  <input
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    placeholder="e.g., 50"
+                    value={numberOfBags || ''}
+                    onChange={(e) => setNumberOfBags(parseFloat(e.target.value) || 0)}
+                    className="w-full h-8 px-3 bg-white text-xs font-semibold text-slate-900 rounded-lg border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Weight per Bag (kg)</label>
+                  <input
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    placeholder="e.g., 50"
+                    value={weightPerBagKg || ''}
+                    onChange={(e) => setWeightPerBagKg(parseFloat(e.target.value) || 0)}
+                    className="w-full h-8 px-3 bg-white text-xs font-semibold text-slate-900 rounded-lg border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                <span className="font-semibold">OR</span>
+                <span>enter total weight directly:</span>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Total Weight (kg)</label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  placeholder="e.g., 2500"
+                  value={totalWeightKg || ''}
+                  onChange={(e) => setTotalWeightKg(parseFloat(e.target.value) || 0)}
+                  className="w-full h-8 px-3 bg-white text-xs font-semibold text-slate-900 rounded-lg border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Weight per Piece (grams)</label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  placeholder="e.g., 10"
+                  value={weightPerPieceGrams || ''}
+                  onChange={(e) => setWeightPerPieceGrams(parseFloat(e.target.value) || 0)}
+                  className="w-full h-8 px-3 bg-white text-xs font-semibold text-slate-900 rounded-lg border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {/* Calculation Result Display */}
+              {weightCalculationResult.isValid && weightCalculationResult.totalWeightKg !== null && (
+                <div className="p-3 bg-white rounded-lg border border-blue-200 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-slate-700">Total Weight:</span>
+                    <span className="font-bold text-blue-700">
+                      {weightCalculationResult.totalWeightKg.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-slate-700">Calculated Pieces:</span>
+                    <span className="font-bold text-green-700">
+                      {weightCalculationResult.pieces !== null 
+                        ? weightCalculationResult.pieces.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!weightCalculationResult.isValid && weightCalculationResult.error && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-700">
+                  {weightCalculationResult.error}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

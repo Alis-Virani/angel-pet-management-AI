@@ -1,6 +1,89 @@
 import { RawMaterial } from '../types';
 
 /**
+ * Weight-to-pieces calculation for raw materials
+ * Formula: pieces = (totalWeightKg × 1000) / weightPerPieceGrams
+ * Where totalWeightKg = numberOfBags × weightPerBagKg
+ */
+export interface WeightToPiecesInput {
+  numberOfBags?: number;      // Number of bags (optional)
+  weightPerBagKg?: number;    // Weight per bag in kg (optional)
+  totalWeightKg?: number;     // Direct total weight in kg (optional)
+  weightPerPieceGrams?: number; // Weight per individual piece in grams
+}
+
+export interface WeightToPiecesResult {
+  totalWeightKg: number | null;
+  pieces: number | null;
+  isValid: boolean;
+  error?: string;
+}
+
+/**
+ * Calculate pieces from weight inputs
+ * @param input - Weight and piece configuration
+ * @returns Result with total weight in kg and calculated pieces
+ */
+export function calculatePiecesFromWeight(input: WeightToPiecesInput): WeightToPiecesResult {
+  const { numberOfBags, weightPerBagKg, totalWeightKg, weightPerPieceGrams } = input;
+
+  // Validate weight per piece - required for pieces calculation
+  if (!weightPerPieceGrams || weightPerPieceGrams <= 0) {
+    return {
+      totalWeightKg: null,
+      pieces: null,
+      isValid: false,
+      error: 'Weight per piece must be a positive number'
+    };
+  }
+
+  // Calculate total weight from bags
+  let calculatedTotalWeightKg: number | null = null;
+  
+  if (numberOfBags && weightPerBagKg) {
+    if (numberOfBags <= 0 || weightPerBagKg <= 0) {
+      return {
+        totalWeightKg: null,
+        pieces: null,
+        isValid: false,
+        error: 'Number of bags and weight per bag must be positive'
+      };
+    }
+    calculatedTotalWeightKg = numberOfBags * weightPerBagKg;
+  } else if (totalWeightKg) {
+    if (totalWeightKg <= 0) {
+      return {
+        totalWeightKg: null,
+        pieces: null,
+        isValid: false,
+        error: 'Total weight must be positive'
+      };
+    }
+    calculatedTotalWeightKg = totalWeightKg;
+  }
+
+  // If no valid weight input, return invalid
+  if (calculatedTotalWeightKg === null) {
+    return {
+      totalWeightKg: null,
+      pieces: null,
+      isValid: false,
+      error: 'Enter either number of bags with weight per bag, or total weight'
+    };
+  }
+
+  // Calculate pieces: (totalWeightKg × 1000) / weightPerPieceGrams
+  const totalWeightGrams = calculatedTotalWeightKg * 1000;
+  const pieces = totalWeightGrams / weightPerPieceGrams;
+
+  return {
+    totalWeightKg: calculatedTotalWeightKg,
+    pieces,
+    isValid: true
+  };
+}
+
+/**
  * Convert a quantity from any unit to the base unit
  * @param quantity - The quantity to convert
  * @param fromUnit - The unit to convert from
