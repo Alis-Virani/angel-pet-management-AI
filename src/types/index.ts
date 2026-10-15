@@ -71,6 +71,7 @@ export interface OrderItem {
   subtotal: number;
   soldByPacket?: boolean;
   packetCount?: number; // can be decimal for fractional packets
+  loosePieces?: number;
   unitsPerPacket?: number;
   // Packaging & combo fields
   selectedInnerId?: string; // ID of the selected inner product
@@ -120,6 +121,8 @@ export interface Order {
   paymentStatus: PaymentStatus;
   paidAmount: number;
   orderDate: string;
+  dueDate?: string;
+  paymentTerms?: string;
   signedCopy?: SignedOrderCopy;
   notes?: string;
   gstApplied?: boolean;
@@ -136,6 +139,10 @@ export interface DispatchItem {
   productId: string;
   productName: string;
   quantity: number;
+  deliveryUnit?: 'pieces' | 'packets';
+  packetQuantity?: number;
+  loosePieces?: number;
+  unitsPerPacket?: number;
 }
 
 export interface Dispatch {
@@ -168,6 +175,19 @@ export interface Payment {
   paymentMethod: PaymentMethod;
   paymentDate: string;
   notes?: string;
+}
+
+export interface PaymentReminder {
+  id: string;
+  orderId: string;
+  customerId: string;
+  customerName: string;
+  phone: string;
+  dueDate?: string;
+  followUpDate?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Expense {

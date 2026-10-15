@@ -26,6 +26,7 @@ import type {
   Product,
   Order,
   Payment,
+  PaymentReminder,
   Expense,
   Dispatch,
   RawMaterial,
@@ -72,6 +73,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'angel_pet_settings',
   PURCHASES: 'angel_pet_purchases',
   PURCHASED_MATERIALS: 'angel_pet_purchased_materials',
+  PAYMENT_REMINDERS: 'angel_pet_payment_reminders',
   INITIALIZED: 'angel_pet_seed_initialized_v3'
 };
 
@@ -135,6 +137,53 @@ function mergeLocalAndRemote<T extends { id: string }>(localList: T[], remoteLis
   }
 
   return merged;
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function createUniqueId(prefix: string, existingIds: Set<string>): string {
+  let id = '';
+  do {
+    id = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  } while (existingIds.has(id));
+  return id;
+}
+
+function mergePurchases(localList: PurchaseOrder[], remoteList: PurchaseOrder[]): PurchaseOrder[] {
+  const merged = mergeLocalAndRemote(localList, remoteList);
+  const localById = new Map(localList.map((purchase) => [purchase.id, purchase]));
+  const remoteById = new Map(remoteList.map((purchase) => [purchase.id, purchase]));
+
+  return dedupeById(merged.map((purchase) => {
+    const localPurchase = localById.get(purchase.id);
+    const remotePurchase = remoteById.get(purchase.id);
+    if (!localPurchase || !remotePurchase) return purchase;
+
+    const paymentRecords = dedupeById([
+      ...(localPurchase.paymentRecords || []),
+      ...(remotePurchase.paymentRecords || [])
+    ]);
+    const paidAmount = Math.max(
+      localPurchase.paidAmount || 0,
+      remotePurchase.paidAmount || 0,
+      paymentRecords.reduce((sum, payment) => sum + payment.amount, 0)
+    );
+
+    return {
+      ...remotePurchase,
+      ...localPurchase,
+      paymentRecords: paymentRecords.length > 0 ? paymentRecords : undefined,
+      paidAmount,
+      paymentStatus: paidAmount >= purchase.totalAmount ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'pending'
+    };
+  }));
 }
 
 function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
@@ -464,7 +513,7 @@ export async function getOrders(): Promise<Order[]> {
       console.warn('Firebase getOrders failed or timed out, falling back to LocalStorage:', e);
     }
   }
-  return localItems;
+  return dedupeById(localItems);
 }
 
 export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'paidAmount' | 'paymentStatus' | 'orderStatus' | 'orderDate'>): Promise<Order> {
@@ -510,7 +559,8 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
 
   // If Cash Memo and not AS Order, automatically record full payment in Finance
   if (!isAS && isCashMemo && newOrder.totalAmount > 0) {
-    const receiptNumber = `REC-${Math.floor(5000 + Math.random() * 5000)}`;
+    const existingPaymentIds = new Set((await getPayments()).map((payment) => payment.id));
+    const receiptNumber = createUniqueId('REC', existingPaymentIds);
     const newPayment: Payment = {
       id: receiptNumber,
       receiptNumber,
@@ -846,13 +896,13 @@ export async function getPayments(): Promise<Payment[]> {
         const remoteItems = snap.docs.map((d) => d.data() as Payment);
         const merged = mergeLocalAndRemote(localItems, remoteItems);
         setLocalItem(STORAGE_KEYS.PAYMENTS, merged);
-        return merged;
+        return dedupeById(merged);
       }
     } catch (e) {
       console.warn('Firebase getPayments failed or timed out, falling back to LocalStorage:', e);
     }
   }
-  return localItems;
+  return dedupeById(localItems);
 }
 
 export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): Promise<Payment> {
@@ -875,7 +925,8 @@ export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): P
     throw new Error('Payment amount cannot exceed the outstanding balance.');
   }
 
-  const receiptNumber = `REC-${Math.floor(5000 + Math.random() * 5000)}`;
+  const existingPaymentIds = new Set((await getPayments()).map((payment) => payment.id));
+  const receiptNumber = createUniqueId('REC', existingPaymentIds);
   const newPayment: Payment = {
     ...data,
     id: receiptNumber,
@@ -901,6 +952,56 @@ export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): P
   return newPayment;
 }
 
+// ================= PAYMENT REMINDERS =================
+export async function getPaymentReminders(): Promise<PaymentReminder[]> {
+  const localItems = getLocalItem<PaymentReminder[]>(STORAGE_KEYS.PAYMENT_REMINDERS, []);
+  const dedupeByOrderId = (items: PaymentReminder[]) => {
+    const seenOrders = new Set<string>();
+    return items.filter((item) => {
+      if (seenOrders.has(item.orderId)) return false;
+      seenOrders.add(item.orderId);
+      return true;
+    });
+  };
+  if (isLiveFirebaseConfigured && db) {
+    try {
+      const snap = await withTimeout(getDocs(collection(getDb(), 'paymentReminders')), 2000);
+      if (snap && snap.docs.length > 0) {
+        const remoteItems = snap.docs.map((d) => d.data() as PaymentReminder);
+        const merged = dedupeByOrderId(dedupeById(mergeLocalAndRemote(localItems, remoteItems)));
+        setLocalItem(STORAGE_KEYS.PAYMENT_REMINDERS, merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Firebase getPaymentReminders failed or timed out, falling back to LocalStorage:', e);
+    }
+  }
+  return dedupeByOrderId(dedupeById(localItems));
+}
+
+export async function savePaymentReminder(
+  data: Omit<PaymentReminder, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<PaymentReminder> {
+  const now = new Date().toISOString();
+  const existing = (await getPaymentReminders()).find((reminder) => reminder.orderId === data.orderId);
+  const reminder: PaymentReminder = {
+    ...data,
+    id: existing?.id || `REM-${data.orderId}`,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+  const list = getLocalItem<PaymentReminder[]>(STORAGE_KEYS.PAYMENT_REMINDERS, []);
+  const next = [reminder, ...list.filter((item) => item.id !== reminder.id && item.orderId !== reminder.orderId)];
+  setLocalItem(STORAGE_KEYS.PAYMENT_REMINDERS, next);
+
+  if (shouldSyncToFirebase()) {
+    withTimeout(setDoc(doc(getDb(), 'paymentReminders', reminder.id), sanitizeForFirestore(reminder)), 2500).catch((e) =>
+      console.error('Error saving payment reminder to Firebase:', e)
+    );
+  }
+  return reminder;
+}
+
 // ================= EXPENSES =================
 export async function getExpenses(): Promise<Expense[]> {
   const localItems = getLocalItem<Expense[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
@@ -918,31 +1019,8 @@ export async function getExpenses(): Promise<Expense[]> {
     }
   }
 
-  // Specifically remove accidental test records EXP-664 ("something") and EXP-743 ("hi") if present
-  const testIdsToRemove = items
-    .filter(
-      (e) =>
-        e.id === 'EXP-664' ||
-        e.id === 'EXP-743' ||
-        e.description?.trim().toLowerCase() === 'something' ||
-        e.description?.trim().toLowerCase() === 'hi'
-    )
-    .map((e) => e.id);
-
-  if (testIdsToRemove.length > 0) {
-    items = items.filter((e) => !testIdsToRemove.includes(e.id));
-    setLocalItem(STORAGE_KEYS.EXPENSES, items);
-    if (shouldSyncToFirebase()) {
-      for (const tid of testIdsToRemove) {
-        withTimeout(deleteDoc(doc(getDb(), 'expenses', tid)), 2500).catch((err) =>
-          console.error(`Error purging test expense ${tid} from Firebase:`, err)
-        );
-      }
-    }
-  } else {
-    setLocalItem(STORAGE_KEYS.EXPENSES, items);
-  }
-
+  items = dedupeById(items);
+  setLocalItem(STORAGE_KEYS.EXPENSES, items);
   return items;
 }
 
@@ -1230,7 +1308,7 @@ export async function getPurchases(): Promise<PurchaseOrder[]> {
       const snap = await withTimeout(getDocs(collection(getDb(), 'purchases')), 2000);
       if (snap && snap.docs.length > 0) {
         const remoteItems = snap.docs.map((d) => d.data() as PurchaseOrder);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
+        const merged = mergePurchases(localItems, remoteItems);
         setLocalItem(STORAGE_KEYS.PURCHASES, merged);
         return merged;
       }
@@ -1238,7 +1316,7 @@ export async function getPurchases(): Promise<PurchaseOrder[]> {
       console.warn('Firebase getPurchases failed or timed out, falling back to LocalStorage:', e);
     }
   }
-  return localItems;
+  return dedupeById(localItems);
 }
 
 export async function addPurchase(

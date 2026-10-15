@@ -406,9 +406,9 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                     {item.productType}
                   </td>
                   <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: '#0f172a', fontSize: '9.5px', verticalAlign: 'middle' }}>
-                    {item.soldByPacket && item.packetCount && item.unitsPerPacket && !isComponent ? (
+                    {item.soldByPacket && item.packetCount !== undefined && item.unitsPerPacket && !isComponent ? (
                       <div>
-                        <div>{item.packetCount.toLocaleString('en-IN')} Packets</div>
+                        <div>{item.packetCount.toLocaleString('en-IN')} Packets + {(item.loosePieces || 0).toLocaleString('en-IN')} loose pieces</div>
                         <div style={{ fontSize: '8px', color: '#64748b', fontWeight: 500, marginTop: '1px' }}>
                           ({item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt &bull; Total: {quantity.toLocaleString('en-IN')} pcs)
                         </div>
@@ -997,9 +997,9 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                     </td>
                     <td className="py-3.5 px-4">{isComponent ? '-' : `₹${unitPrice.toFixed(2)}`}</td>
                     <td className="py-3.5 px-4 font-semibold">
-                      {item.soldByPacket && item.packetCount && item.unitsPerPacket && !isComponent ? (
+                      {item.soldByPacket && item.packetCount !== undefined && item.unitsPerPacket && !isComponent ? (
                         <div className="space-y-0.5">
-                          <div>Quantity: {item.packetCount.toLocaleString('en-IN')} Packets</div>
+                          <div>Quantity: {item.packetCount.toLocaleString('en-IN')} Packets + {(item.loosePieces || 0).toLocaleString('en-IN')} loose pieces</div>
                           <div className="text-[11px] font-medium text-slate-500">
                             Units per Packet: {item.unitsPerPacket.toLocaleString('en-IN')}
                           </div>

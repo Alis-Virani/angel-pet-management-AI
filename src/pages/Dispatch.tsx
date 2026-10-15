@@ -404,10 +404,17 @@ export const DispatchPage: React.FC<DispatchProps> = ({
                       {item.productName}
                     </td>
                     <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: '800', color: '#0f172a', fontSize: '12px' }}>
-                      {item.quantity.toLocaleString('en-IN')}
+                      {item.deliveryUnit === 'packets' && item.packetQuantity !== undefined
+                        ? `${item.packetQuantity.toLocaleString('en-IN')} + ${(item.loosePieces || 0).toLocaleString('en-IN')} loose`
+                        : item.quantity.toLocaleString('en-IN')}
+                      {item.deliveryUnit === 'packets' && item.unitsPerPacket
+                        ? <div style={{ fontSize: '8px', fontWeight: '600', color: '#475569', marginTop: '2px' }}>({item.quantity.toLocaleString('en-IN')} pcs)</div>
+                        : null}
                     </td>
                     <td style={{ padding: '7px 10px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', color: '#475569', fontWeight: '600' }}>
-                      pcs
+                      {item.deliveryUnit === 'packets' && item.unitsPerPacket
+                        ? <>{item.packetQuantity === 1 ? 'packet' : 'packets'}<div style={{ fontSize: '8px', fontWeight: '500' }}>{item.unitsPerPacket} pcs/packet + {item.loosePieces || 0} loose pcs</div></>
+                        : 'pcs'}
                     </td>
                   </tr>
                 ))}

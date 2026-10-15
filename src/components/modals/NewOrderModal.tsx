@@ -22,6 +22,7 @@ interface DraftOrderItem {
   quantity: number | string;
   sellByPacket: boolean;
   packetCount: number | string;
+  loosePieces: number | string;
   selectedInnerId?: string; // id of selected inner product or ''
   selectedCapId?: string; // id of selected cap product or ''
 }
@@ -32,6 +33,7 @@ const createDraftItem = (productId = '', id = `line-${Date.now()}-${Math.random(
   quantity: '',
   sellByPacket: false,
   packetCount: '',
+  loosePieces: '',
   selectedInnerId: '',
   selectedCapId: ''
 });
@@ -78,6 +80,35 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
   const [newCustomerCompany, setNewCustomerCompany] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
+  const resetOrderForm = () => {
+    setSelectedCustomerId('');
+    setCustomerSearch('');
+    setIsCustomerSearchFocused(false);
+    setItems([createDraftItem('')]);
+    setProductSearches({});
+    setFocusedProductItemId(null);
+    setPriceCategory('A');
+    setPaymentType('debit_memo');
+    setIncludeGst(true);
+    setNotes('');
+    setOrderType('REGULAR');
+    setPendingFocusItemId(null);
+    setIsInlineCustomer(false);
+    setNewCustomerName('');
+    setNewCustomerCompany('');
+    setNewCustomerPhone('');
+    setError('');
+    setSubmittingMode(null);
+    setSaveSuccess(false);
+    setShowPrintSuccessPopup(false);
+    isSubmittingRef.current = false;
+  };
+
+  const handleClose = () => {
+    resetOrderForm();
+    onClose();
+  };
+
   const handleDismissSuccessPopup = () => {
     if (successTimeoutRef.current) {
       clearTimeout(successTimeoutRef.current);
@@ -86,7 +117,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     setShowPrintSuccessPopup(false);
     setSubmittingMode(null);
     isSubmittingRef.current = false;
-    onClose();
+    handleClose();
   };
 
   useEffect(() => {
@@ -100,29 +131,18 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      loadData();
-      isSubmittingRef.current = false;
-      setSubmittingMode(null);
-      setSaveSuccess(false);
-      setShowPrintSuccessPopup(false);
-      setError('');
+      resetOrderForm();
+      loadData(true);
     } else {
       if (successTimeoutRef.current) {
         clearTimeout(successTimeoutRef.current);
         successTimeoutRef.current = null;
       }
-      // Reset state when modal closes
-      setSelectedCustomerId('');
-      setCustomerSearch('');
-      setIsCustomerSearchFocused(false);
-      setSubmittingMode(null);
-      setSaveSuccess(false);
-      setShowPrintSuccessPopup(false);
-      isSubmittingRef.current = false;
+      resetOrderForm();
     }
   }, [isOpen]);
 
-  const loadData = async () => {
+  const loadData = async (useDefaultCustomer = false) => {
     try {
       const [cusList, prdList, ordList, stg] = await Promise.all([getCustomers(), getProducts(), getOrders(), getSettings()]);
       const activeCustomers = cusList.filter((c) => c.status === 'active');
@@ -131,7 +151,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       setOrders(ordList);
       setSettings(stg);
 
-      if (activeCustomers.length > 0 && (!selectedCustomerId || !activeCustomers.some((c) => c.id === selectedCustomerId))) {
+      if (activeCustomers.length > 0 && (useDefaultCustomer || !selectedCustomerId || !activeCustomers.some((c) => c.id === selectedCustomerId))) {
         setSelectedCustomerId(activeCustomers[0].id);
         setPriceCategory(activeCustomers[0].priceCategory);
       } else if (activeCustomers.length === 0) {
@@ -160,10 +180,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
 
     const unitsPerPacket = getProductUnitsPerPacket(product);
     if (unitsPerPacket && item.sellByPacket) {
+      const loosePieces = Number(item.loosePieces || 0);
+      if (!Number.isInteger(loosePieces) || loosePieces < 0 || loosePieces >= unitsPerPacket) return false;
+      const packetCount = Number(item.packetCount || 0);
+      if (!Number.isFinite(packetCount) || packetCount < 0) return false;
       if (!canProductUseFractionalPackets(product)) {
-        return isPositiveInteger(item.packetCount);
+        return Number.isInteger(packetCount) && packetCount * unitsPerPacket + loosePieces > 0;
       }
-      return isPositiveNumber(item.packetCount);
+      return packetCount * unitsPerPacket + loosePieces > 0;
     }
     return isPositiveNumber(item.quantity);
   };
@@ -254,9 +278,10 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const isPacketMode = Boolean(item.sellByPacket && unitsPerPacket);
       const rawQty = item.quantity === '' || isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
       const rawPackets = item.packetCount === '' || isNaN(Number(item.packetCount)) ? 0 : Number(item.packetCount);
+      const loosePieces = item.loosePieces === '' || isNaN(Number(item.loosePieces)) ? 0 : Number(item.loosePieces);
 
       const quantity = isPacketMode && unitsPerPacket
-        ? calculatePacketUnits(rawPackets, unitsPerPacket)
+        ? calculatePacketUnits(rawPackets, unitsPerPacket) + loosePieces
         : rawQty;
 
       const packetCount = isPacketMode
@@ -307,9 +332,10 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         totalWeightDisplay: itemWeightGrams ? formatWeight(itemWeightGrams) : undefined
       };
 
-      if (isPacketMode && unitsPerPacket && packetCount) {
+      if (isPacketMode && unitsPerPacket && quantity > 0) {
         orderItem.soldByPacket = true;
         orderItem.packetCount = packetCount;
+        orderItem.loosePieces = loosePieces;
         orderItem.unitsPerPacket = unitsPerPacket;
       }
       return orderItem;
@@ -335,7 +361,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (cleanedValue === '') {
       updateItem(id, {
         quantity: '',
-        packetCount: ''
+        packetCount: '',
+        loosePieces: ''
       });
       return;
     }
@@ -347,12 +374,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const calculatedPackets = calculatePacketsFromQuantity(numQty, unitsPerPacket);
       updateItem(id, {
         quantity: cleanedValue,
-        packetCount: calculatedPackets
+        packetCount: calculatedPackets,
+        loosePieces: 0
       });
     } else {
       updateItem(id, {
         quantity: cleanedValue,
-        packetCount: ''
+        packetCount: '',
+        loosePieces: ''
       });
     }
   };
@@ -366,7 +395,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     if (cleanedValue === '') {
       updateItem(id, {
         packetCount: '',
-        quantity: ''
+        quantity: '',
+        loosePieces: ''
       });
       return;
     }
@@ -378,7 +408,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const derivedQuantity = calculatePacketUnits(numPackets, unitsPerPacket);
       updateItem(id, {
         packetCount: cleanedValue,
-        quantity: derivedQuantity
+        quantity: derivedQuantity + Number(current?.loosePieces || 0)
       });
     } else {
       updateItem(id, {
@@ -401,25 +431,24 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const numPackets = Number(current.packetCount);
       const numQty = Number(current.quantity);
 
-      if (Number.isFinite(numPackets) && numPackets > 0) {
+      if (Number.isFinite(numQty) && numQty > 0) {
+        packetCount = Math.floor(numQty / unitsPerPacket);
+      } else if (Number.isFinite(numPackets) && numPackets >= 0) {
         packetCount = numPackets;
-      } else if (Number.isFinite(numQty) && numQty > 0) {
-        const calculated = calculatePacketsFromQuantity(numQty, unitsPerPacket);
-        if (!canProductUseFractionalPackets(product)) {
-          packetCount = Math.max(1, Math.round(calculated));
-        } else {
-          packetCount = calculated;
-        }
       }
 
       const derivedQuantity = typeof packetCount === 'number' && packetCount > 0
         ? calculatePacketUnits(packetCount, unitsPerPacket)
         : (packetCount !== '' && Number(packetCount) > 0 ? calculatePacketUnits(Number(packetCount), unitsPerPacket) : '');
+      const derivedLoosePieces = Number.isFinite(numQty) && numQty > 0
+        ? Math.round((numQty % unitsPerPacket) * 10000) / 10000
+        : Number(current.loosePieces || 0);
 
       updateItem(id, {
         sellByPacket: true,
         packetCount: packetCount !== '' ? packetCount : '',
-        quantity: derivedQuantity
+        loosePieces: derivedLoosePieces,
+        quantity: Number(derivedQuantity || 0) + derivedLoosePieces
       });
     } else {
       // Switching to Pieces mode: derive quantity in pieces from packets if quantity is empty
@@ -436,7 +465,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       updateItem(id, {
         sellByPacket: false,
         quantity: quantity !== '' ? quantity : '',
-        packetCount: current.packetCount
+        packetCount: current.packetCount,
+        loosePieces: current.loosePieces
       });
     }
   };
@@ -452,6 +482,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       quantity: '',
       sellByPacket: false,
       packetCount: '',
+      loosePieces: '',
       selectedInnerId: '',
       selectedCapId: ''
     });
@@ -567,10 +598,14 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const product = products.find((candidate) => candidate.id === item.productId);
       const unitsPerPacket = getProductUnitsPerPacket(product);
       if (unitsPerPacket && item.sellByPacket) {
+        const loosePieces = item.loosePieces === '' ? 0 : Number(item.loosePieces);
+        if (!Number.isInteger(loosePieces) || loosePieces < 0 || loosePieces >= unitsPerPacket) return true;
+        const packetCount = Number(item.packetCount || 0);
+        if (!Number.isFinite(packetCount) || packetCount < 0) return true;
         if (!canProductUseFractionalPackets(product)) {
-          return !isPositiveInteger(item.packetCount);
+          return !Number.isInteger(packetCount) || packetCount * unitsPerPacket + loosePieces <= 0;
         }
-        return !isPositiveNumber(item.packetCount);
+        return packetCount * unitsPerPacket + loosePieces <= 0;
       }
       return item.quantity === '' || !isPositiveNumber(item.quantity);
     });
@@ -580,6 +615,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       const unitsPerPacket = getProductUnitsPerPacket(product);
       if (unitsPerPacket && invalidQuantityItem.sellByPacket && !canProductUseFractionalPackets(product)) {
         setError(`Product "${product?.name || 'Selected product'}" requires whole packets (e.g. 1, 2, 3). For decimal quantities, please switch to Pieces mode.`);
+      } else if (unitsPerPacket && invalidQuantityItem.sellByPacket) {
+        setError(`Loose pieces must be a whole number from 0 to ${unitsPerPacket - 1} for "${product?.name || 'Selected product'}".`);
       } else {
         setError(t('Please enter a valid positive quantity. For packet selling, Number of Packets must be a positive number.'));
       }
@@ -685,7 +722,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         setSaveSuccess(false);
         isSubmittingRef.current = false;
         if (onOrderCreated) onOrderCreated();
-        onClose();
+        handleClose();
       }
     } catch (err) {
       if (printWin && !printWin.closed) {
@@ -703,7 +740,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       isOpen={isOpen}
       onClose={() => {
         if (!loading && !isSubmittingRef.current && !showPrintSuccessPopup) {
-          onClose();
+          handleClose();
         }
       }}
       title={t('Create New Sales Order')}
@@ -960,8 +997,9 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
               const isPacketMode = Boolean(item.sellByPacket && unitsPerPacket);
               const rawQty = item.quantity === '' || isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
               const rawPackets = item.packetCount === '' || isNaN(Number(item.packetCount)) ? 0 : Number(item.packetCount);
+              const loosePieces = item.loosePieces === '' || isNaN(Number(item.loosePieces)) ? 0 : Number(item.loosePieces);
               const itemQuantity = isPacketMode && unitsPerPacket
-                ? calculatePacketUnits(rawPackets, unitsPerPacket)
+                ? calculatePacketUnits(rawPackets, unitsPerPacket) + loosePieces
                 : rawQty;
 
               const packetBreakdown = unitsPerPacket && itemQuantity > 0
@@ -1111,7 +1149,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                           </div>
 
                           {item.sellByPacket ? (
-                            <div>
+                            <div className="space-y-1.5">
                               <div className="relative">
                                 <input
                                   type="text"
@@ -1133,15 +1171,37 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                                   pkts
                                 </span>
                               </div>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={Math.max(0, unitsPerPacket - 1)}
+                                  step="1"
+                                  required={Boolean(item.productId)}
+                                  placeholder="0"
+                                  value={item.loosePieces === '' ? '' : String(item.loosePieces)}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    const loose = value === '' ? '' : Math.max(0, parseInt(value, 10) || 0);
+                                    const packets = Number(item.packetCount || 0);
+                                    updateItem(item.id, {
+                                      loosePieces: loose,
+                                      quantity: calculatePacketUnits(packets, unitsPerPacket) + Number(loose || 0)
+                                    });
+                                  }}
+                                  className="w-full h-9 px-3 pr-16 bg-amber-50/40 text-xs font-semibold text-slate-900 rounded-xl border border-amber-200 focus:bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all"
+                                />
+                                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-amber-700 pointer-events-none">loose pcs</span>
+                              </div>
                               <div
                                 className="text-[10px] font-bold text-blue-700 mt-1 truncate flex items-center gap-1"
-                                title={`${formatNumberDisplay(rawPackets)} pkts × ${unitsPerPacket.toLocaleString('en-IN')} = ${formatNumberDisplay(itemQuantity)} pcs`}
+                                title={`${formatNumberDisplay(rawPackets)} pkts × ${unitsPerPacket.toLocaleString('en-IN')} + ${formatNumberDisplay(loosePieces)} loose = ${formatNumberDisplay(itemQuantity)} pcs`}
                               >
                                 <Package className="w-3 h-3 text-blue-500 shrink-0" />
                                 {itemQuantity > 0 ? (
                                   <>
                                     <span className="font-bold text-blue-700">{formatNumberDisplay(itemQuantity)} pcs</span>
-                                    <span className="text-slate-400 font-normal">({formatNumberDisplay(rawPackets)} × {unitsPerPacket.toLocaleString('en-IN')})</span>
+                                    <span className="text-slate-400 font-normal">({formatNumberDisplay(rawPackets)} × {unitsPerPacket.toLocaleString('en-IN')} + {formatNumberDisplay(loosePieces)} loose)</span>
                                   </>
                                 ) : (
                                   <span className="text-slate-400 font-normal">— pcs (@{unitsPerPacket.toLocaleString('en-IN')} u/pkt)</span>
@@ -1691,7 +1751,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={loading}
             className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
           >

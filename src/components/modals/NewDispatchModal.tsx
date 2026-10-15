@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
-import { Order, Dispatch, DispatchStatus } from '../../types';
-import { getOrders, getDispatches, addDispatch } from '../../services/db';
+import { Order, Dispatch, DispatchStatus, Product } from '../../types';
+import { getOrders, getDispatches, addDispatch, getProducts } from '../../services/db';
 import { getOrderDeliveryProgress, generateNextChallanNumber } from '../../utils/dispatchUtils';
+import { calculatePiecesFromPackets, getProductUnitsPerPacket, canProductUseFractionalPackets, cleanDecimalInput } from '../../utils/packetUtils';
 import { Truck, AlertCircle, CheckCircle2, PackageCheck } from 'lucide-react';
 
 interface NewDispatchModalProps {
@@ -20,8 +21,11 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
 }) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState('');
-  const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
+  const [itemQuantities, setItemQuantities] = useState<Record<string, number | string>>({});
+  const [itemLoosePieces, setItemLoosePieces] = useState<Record<string, number | string>>({});
+  const [itemUnits, setItemUnits] = useState<Record<string, 'pieces' | 'packets'>>({});
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
@@ -39,9 +43,10 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
 
   const loadData = async () => {
     try {
-      const [orderList, dispatchList] = await Promise.all([getOrders(), getDispatches()]);
+      const [orderList, dispatchList, productList] = await Promise.all([getOrders(), getDispatches(), getProducts()]);
       setOrders(orderList);
       setDispatches(dispatchList);
+      setProducts(productList);
 
       // Find orders that still have remaining items to deliver
       const eligibleOrders = orderList.filter((o) => {
@@ -67,10 +72,14 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
   const initQuantities = (order: Order, dispatchList: Dispatch[]) => {
     const progress = getOrderDeliveryProgress(order, dispatchList);
     const initialQtyMap: Record<string, number> = {};
+    const initialUnitMap: Record<string, 'pieces' | 'packets'> = {};
     progress.items.forEach((item) => {
       initialQtyMap[item.productId] = item.remainingQuantity;
+      initialUnitMap[item.productId] = 'pieces';
     });
     setItemQuantities(initialQtyMap);
+    setItemLoosePieces({});
+    setItemUnits(initialUnitMap);
   };
 
   const handleOrderChange = (orderId: string) => {
@@ -86,21 +95,34 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
   const orderProgress = selectedOrder ? getOrderDeliveryProgress(selectedOrder, dispatches) : null;
   const nextChallanNumber = generateNextChallanNumber(dispatches);
 
-  const handleQuantityChange = (productId: string, valStr: string, maxLimit: number) => {
-    const val = parseInt(valStr, 10);
-    const safeVal = isNaN(val) ? 0 : Math.max(0, val);
+  const handleQuantityChange = (productId: string, valStr: string, maxLimit: number, unit: 'pieces' | 'packets', unitsPerPacket?: number) => {
+    const cleaned = unit === 'packets' ? cleanDecimalInput(valStr) : valStr.replace(/\D/g, '');
+    const entered = cleaned === '' ? 0 : Number(cleaned);
+    const safeVal = Number.isFinite(entered) ? Math.max(0, entered) : 0;
     setItemQuantities((prev) => ({
       ...prev,
-      [productId]: safeVal
+      [productId]: cleaned === '' ? '' : safeVal
     }));
-    if (safeVal > maxLimit) {
-      setError(`Only ${maxLimit.toLocaleString()} units remain for delivery.`);
+    const loosePieces = Number(itemLoosePieces[productId] || 0);
+    const pieces = unit === 'packets' && unitsPerPacket ? calculatePiecesFromPackets(safeVal, unitsPerPacket) + loosePieces : safeVal;
+    if (pieces > maxLimit) {
+      setError(`Only ${maxLimit.toLocaleString()} pieces remain for delivery.`);
     } else {
       setError('');
     }
   };
 
+  const handleLoosePiecesChange = (productId: string, value: string, maxLimit: number, unitsPerPacket: number) => {
+    const cleaned = value.replace(/\D/g, '');
+    const loosePieces = cleaned === '' ? '' : Math.min(unitsPerPacket - 1, Number(cleaned));
+    setItemLoosePieces((prev) => ({ ...prev, [productId]: loosePieces }));
+    const packets = Number(itemQuantities[productId] || 0);
+    const pieces = calculatePiecesFromPackets(packets, unitsPerPacket) + Number(loosePieces || 0);
+    setError(pieces > maxLimit ? `Only ${maxLimit.toLocaleString()} pieces remain for delivery.` : '');
+  };
+
   const handleFillRemaining = (productId: string, remaining: number) => {
+    setItemUnits((prev) => ({ ...prev, [productId]: 'pieces' }));
     setItemQuantities((prev) => ({
       ...prev,
       [productId]: remaining
@@ -108,7 +130,12 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
     setError('');
   };
 
-  const totalDeliveringUnits = Object.values(itemQuantities).reduce((sum, q) => sum + (q || 0), 0);
+  const totalDeliveringUnits = orderProgress?.items.reduce((sum, item) => {
+    const orderItem = selectedOrder?.items.find((candidate) => candidate.productId === item.productId);
+    const value = Number(itemQuantities[item.productId] || 0);
+    const unit = itemUnits[item.productId] || 'pieces';
+    return sum + (unit === 'packets' && getProductUnitsPerPacket(orderItem) ? calculatePiecesFromPackets(value, getProductUnitsPerPacket(orderItem)!) : value);
+  }, 0) || 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,22 +153,46 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
     }
 
     // Build items to dispatch
-    const itemsToDispatch: { productId: string; productName: string; quantity: number }[] = [];
+    const itemsToDispatch: Dispatch['items'] = [];
     for (const item of orderProgress.items) {
-      const enteredQty = itemQuantities[item.productId] || 0;
-      if (enteredQty > item.remainingQuantity) {
+      const orderItem = selectedOrder.items.find((candidate) => candidate.productId === item.productId);
+      const unit = itemUnits[item.productId] || 'pieces';
+      const enteredValue = Number(itemQuantities[item.productId] || 0);
+      const loosePieces = Number(itemLoosePieces[item.productId] || 0);
+      const unitsPerPacket = getProductUnitsPerPacket(orderItem);
+      const enteredPieces = unit === 'packets' && unitsPerPacket
+        ? calculatePiecesFromPackets(enteredValue, unitsPerPacket) + loosePieces
+        : enteredValue;
+      if (unit === 'packets' && !unitsPerPacket && enteredValue > 0) {
+        setError(`Packet size is not configured for ${item.productName}; use Pieces mode.`);
+        return;
+      }
+      if (unit === 'packets' && (!Number.isInteger(loosePieces) || loosePieces < 0 || loosePieces >= (unitsPerPacket || 1))) {
+        setError(`Loose pieces for ${item.productName} must be a whole number from 0 to ${(unitsPerPacket || 1) - 1}.`);
+        return;
+      }
+      const product = products.find((candidate) => candidate.id === item.productId);
+      if (unit === 'packets' && !canProductUseFractionalPackets(product) && !Number.isInteger(enteredValue)) {
+        setError(`${item.productName} does not allow fractional packets.`);
+        return;
+      }
+      if (enteredPieces > item.remainingQuantity) {
         setError(
           orderProgress.items.length === 1
-            ? `Only ${item.remainingQuantity.toLocaleString()} units remain for delivery.`
-            : `Only ${item.remainingQuantity.toLocaleString()} units remain for delivery of ${item.productName}.`
+            ? `Only ${item.remainingQuantity.toLocaleString()} pieces remain for delivery.`
+            : `Only ${item.remainingQuantity.toLocaleString()} pieces remain for delivery of ${item.productName}.`
         );
         return;
       }
-      if (enteredQty > 0) {
+      if (enteredPieces > 0) {
         itemsToDispatch.push({
           productId: item.productId,
           productName: item.productName,
-          quantity: enteredQty
+          quantity: enteredPieces,
+          deliveryUnit: unit,
+          packetQuantity: unit === 'packets' ? enteredValue : undefined,
+          loosePieces: unit === 'packets' ? loosePieces : undefined,
+          unitsPerPacket: unit === 'packets' ? unitsPerPacket : undefined
         });
       }
     }
@@ -240,8 +291,16 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-200/70 text-slate-700">
                   {orderProgress.items.map((item) => {
-                    const currentEntered = itemQuantities[item.productId] ?? item.remainingQuantity;
-                    const isOver = currentEntered > item.remainingQuantity;
+                    const orderItem = selectedOrder?.items.find((candidate) => candidate.productId === item.productId);
+                    const product = products.find((candidate) => candidate.id === item.productId);
+                    const unitsPerPacket = getProductUnitsPerPacket(orderItem);
+                    const canUsePackets = Boolean(unitsPerPacket);
+                    const unit = itemUnits[item.productId] || 'pieces';
+                    const currentEntered = itemQuantities[item.productId] ?? (unit === 'pieces' ? item.remainingQuantity : '');
+                    const enteredPieces = unit === 'packets' && unitsPerPacket
+                      ? calculatePiecesFromPackets(Number(currentEntered || 0), unitsPerPacket) + Number(itemLoosePieces[item.productId] || 0)
+                      : Number(currentEntered || 0);
+                    const isOver = enteredPieces > item.remainingQuantity;
 
                     return (
                       <tr key={item.productId} className="hover:bg-white/60">
@@ -262,14 +321,18 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
                         </td>
                         <td className="py-2.5 px-2 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-1 mb-1.5">
+                              <button type="button" onClick={() => { setItemUnits((prev) => ({ ...prev, [item.productId]: 'pieces' })); setItemQuantities((prev) => ({ ...prev, [item.productId]: item.remainingQuantity })); }} className={`px-2 py-1 text-[10px] font-bold rounded-md ${unit === 'pieces' ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-600'}`}>Pieces</button>
+                              <button type="button" disabled={!canUsePackets} onClick={() => { setItemUnits((prev) => ({ ...prev, [item.productId]: 'packets' })); setItemQuantities((prev) => ({ ...prev, [item.productId]: '' })); }} className={`px-2 py-1 text-[10px] font-bold rounded-md ${unit === 'packets' ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-600'} disabled:opacity-40`} title={canUsePackets ? 'Enter packets' : 'Packet size is not configured'}>Packets</button>
+                            </div>
                             <input
                               type="number"
                               min="0"
-                              max={item.remainingQuantity}
+                              step={unit === 'packets' && canProductUseFractionalPackets(product) ? 'any' : '1'}
                               value={currentEntered}
                               disabled={item.remainingQuantity === 0}
                               onChange={(e) =>
-                                handleQuantityChange(item.productId, e.target.value, item.remainingQuantity)
+                                handleQuantityChange(item.productId, e.target.value, item.remainingQuantity, unit, unitsPerPacket)
                               }
                               className={`w-28 px-2.5 py-1 text-right text-xs font-bold rounded-lg border focus:ring-1 ${
                                 isOver
@@ -277,6 +340,23 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
                                   : 'border-slate-300 bg-white text-slate-900 focus:ring-sky-500'
                               } disabled:bg-slate-100 disabled:text-slate-400`}
                             />
+                            {unit === 'packets' && unitsPerPacket && (
+                            <div className="mt-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max={Math.max(0, unitsPerPacket - 1)}
+                                step="1"
+                                value={itemLoosePieces[item.productId] ?? ''}
+                                onChange={(e) => handleLoosePiecesChange(item.productId, e.target.value, item.remainingQuantity, unitsPerPacket)}
+                                className="w-28 px-2.5 py-1 text-right text-xs font-bold rounded-lg border border-amber-200 bg-amber-50/40"
+                                placeholder="Loose pcs"
+                              />
+                            </div>
+                            )}
+                            <div className="text-[10px] text-slate-500 mt-1">
+                            {unit === 'packets' && unitsPerPacket ? `${currentEntered || 0} packets × ${unitsPerPacket} + ${itemLoosePieces[item.productId] || 0} loose = ${enteredPieces.toLocaleString()} pcs` : `${enteredPieces.toLocaleString()} pcs`}
+                            </div>
                             <button
                               type="button"
                               onClick={() => handleFillRemaining(item.productId, item.remainingQuantity)}

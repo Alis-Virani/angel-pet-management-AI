@@ -22,6 +22,7 @@ interface DraftItem {
   quantity: number | string;
   sellByPacket: boolean;
   packetCount: number | string;
+  loosePieces: number | string;
   savedUnitsPerPacket?: number;
   initialProductId?: string;
   initialPriceCategory?: PriceCategory;
@@ -39,6 +40,7 @@ const createDraftItem = (item?: OrderItem, defaultCategory: PriceCategory = 'A')
     quantity: item?.quantity || '',
     sellByPacket: Boolean(item?.soldByPacket && item.packetCount && item.unitsPerPacket),
     packetCount: item?.soldByPacket && item.packetCount ? item.packetCount : '',
+    loosePieces: item?.soldByPacket ? item.loosePieces ?? 0 : '',
     savedUnitsPerPacket: item?.unitsPerPacket,
     initialProductId: item?.productId,
     initialPriceCategory: item?.priceCategory,
@@ -117,6 +119,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
       selectedCapId: defaultCapId,
       sellByPacket: false,
       packetCount: '',
+      loosePieces: '',
       savedUnitsPerPacket: undefined
     });
   };
@@ -131,13 +134,24 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
     updateItem(id, { packetCount: cleaned });
   };
 
+  const handleLoosePiecesChange = (id: string, value: string, unitsPerPacket: number) => {
+    const cleaned = value.replace(/\D/g, '');
+    const loosePieces = cleaned === '' ? '' : Math.min(unitsPerPacket - 1, Number(cleaned));
+    const current = items.find((item) => item.id === id);
+    const packets = Number(current?.packetCount || 0);
+    updateItem(id, {
+    loosePieces,
+    quantity: calculatePacketUnits(packets, unitsPerPacket) + Number(loosePieces || 0)
+    });
+  };
+
   const handleSellByPacketToggle = (id: string, enabled: boolean, unitsPerPacket?: number) => {
     const current = items.find((item) => item.id === id);
     const product = products.find((candidate) => candidate.id === current?.productId);
     if (!enabled || !unitsPerPacket) {
       const packetCount = current?.packetCount === '' || current?.packetCount == null || isNaN(Number(current.packetCount)) ? 0 : Number(current.packetCount);
       const derivedQuantity = current?.sellByPacket && unitsPerPacket
-        ? calculatePacketUnits(packetCount, unitsPerPacket)
+        ? calculatePacketUnits(packetCount, unitsPerPacket) + Number(current?.loosePieces || 0)
         : (current?.quantity === '' || current?.quantity == null ? 1 : current.quantity);
       const finalQty = derivedQuantity || 1;
       updateItem(id, { sellByPacket: false, quantity: finalQty });
@@ -145,15 +159,12 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
     }
     const currentQty = current?.quantity === '' || current?.quantity == null || isNaN(Number(current.quantity)) ? 0 : Number(current.quantity);
     let packetCount: number | string = 1;
+    let loosePieces = Number(current?.loosePieces || 0);
     if (currentQty > 0) {
-      const calculated = calculatePacketsFromQuantity(currentQty, unitsPerPacket);
-      if (!canProductUseFractionalPackets(product)) {
-        packetCount = Math.max(1, Math.round(calculated));
-      } else {
-        packetCount = calculated;
-      }
+      packetCount = Math.floor(currentQty / unitsPerPacket);
+      loosePieces = Math.round((currentQty % unitsPerPacket) * 10000) / 10000;
     }
-    updateItem(id, { sellByPacket: true, packetCount });
+    updateItem(id, { sellByPacket: true, packetCount, loosePieces });
   };
 
   const handleRemoveItem = (id: string) => {
@@ -170,7 +181,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
     const packetCount = item.packetCount === '' || isNaN(Number(item.packetCount)) ? 0 : Number(item.packetCount);
     const rawQty = item.quantity === '' || isNaN(Number(item.quantity)) ? 0 : Number(item.quantity);
     const quantity = sellByPacket && unitsPerPacket
-      ? calculatePacketUnits(packetCount, unitsPerPacket)
+      ? calculatePacketUnits(packetCount, unitsPerPacket) + Number(item.loosePieces || 0)
       : rawQty;
     const calculatedUnitPrice = getItemUnitPrice(item, products);
     const unitPrice = calculatedUnitPrice ?? 0;
@@ -213,6 +224,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
     if (sellByPacket && unitsPerPacket) {
       orderItem.soldByPacket = true;
       orderItem.packetCount = packetCount;
+      orderItem.loosePieces = Number(item.loosePieces || 0);
       orderItem.unitsPerPacket = unitsPerPacket;
     }
     return orderItem;
@@ -249,10 +261,14 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
       const product = products.find((candidate) => candidate.id === item.productId);
       const unitsPerPacket = getProductUnitsPerPacket(product) || (isPositiveInteger(item.savedUnitsPerPacket) ? item.savedUnitsPerPacket : undefined);
       if (item.sellByPacket && unitsPerPacket) {
+        const loosePieces = Number(item.loosePieces || 0);
+        if (!Number.isInteger(loosePieces) || loosePieces < 0 || loosePieces >= unitsPerPacket) return true;
+        const packetCount = Number(item.packetCount || 0);
+        if (!Number.isFinite(packetCount) || packetCount < 0) return true;
         if (!canProductUseFractionalPackets(product)) {
-          return !isPositiveInteger(item.packetCount);
+          return !Number.isInteger(packetCount) || packetCount * unitsPerPacket + loosePieces <= 0;
         }
-        return !isPositiveNumber(item.packetCount);
+        return packetCount * unitsPerPacket + loosePieces <= 0;
       }
       return item.quantity === '' || !isPositiveNumber(item.quantity);
     });
@@ -263,7 +279,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
       if (invalidQuantityItem.sellByPacket && unitsPerPacket && !canProductUseFractionalPackets(product)) {
         setError(`Product "${product?.name || 'Selected product'}" requires whole packets (e.g. 1, 2, 3). For decimal quantities, please disable Sell by Packet.`);
       } else {
-        setError('Please enter a valid positive quantity. For packet selling, Number of Packets must be a positive number.');
+        setError(`Loose pieces must be a whole number from 0 to ${unitsPerPacket ? unitsPerPacket - 1 : 0}.`);
       }
       return;
     }
@@ -330,7 +346,7 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
             const parsedPacketCount = item.packetCount === '' ? 0 : Number(item.packetCount);
             const packetCount = Number.isFinite(parsedPacketCount) ? parsedPacketCount : 0;
             const quantity = sellByPacket && unitsPerPacket
-              ? calculatePacketUnits(packetCount, unitsPerPacket)
+              ? calculatePacketUnits(packetCount, unitsPerPacket) + Number(item.loosePieces || 0)
               : (item.quantity === '' ? 0 : Number(item.quantity));
 
             const isBottle = product?.type === 'bottle';
@@ -527,6 +543,20 @@ export const EditOrderItemsModal: React.FC<EditOrderItemsModalProps> = ({
                           {!canProductUseFractionalPackets(product) && (
                             <div className="text-[9px] text-amber-700 font-medium mt-0.5">Whole packets only</div>
                           )}
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Loose Pieces</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max={unitsPerPacket ? Math.max(0, unitsPerPacket - 1) : undefined}
+                            step="1"
+                            value={item.loosePieces === '' ? '' : String(item.loosePieces)}
+                            onChange={(e) => {
+                              if (unitsPerPacket) handleLoosePiecesChange(item.id, e.target.value, unitsPerPacket);
+                            }}
+                            className="w-full px-3 py-2 bg-white text-xs font-medium text-slate-800 rounded-xl border border-slate-200"
+                          />
                         </div>
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">Units/Packet</label>

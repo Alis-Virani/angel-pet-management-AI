@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Order, OrderStatus, PaymentStatus, PriceCategory } from '../types';
-import { getOrders, updateOrderStatus } from '../services/db';
+import { Dispatch, Order, OrderStatus, PaymentStatus, PriceCategory } from '../types';
+import { getDispatches, getOrders, updateOrderStatus } from '../services/db';
 import { getOrderQuantity } from '../utils/orderUtils';
+import { getOrderDeliveryProgress } from '../utils/dispatchUtils';
+import { formatNumberDisplay } from '../utils/packetUtils';
 import { Badge } from '../components/common/Badge';
 import {
   Search,
@@ -17,6 +19,7 @@ import {
   FileSpreadsheet,
   XCircle,
   Building2
+  , Printer
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
@@ -42,6 +45,9 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'amount_high'>('newest');
   const [loading, setLoading] = useState(true);
+  const [dispatches, setDispatches] = useState<Dispatch[]>([]);
+  const [printOrder, setPrintOrder] = useState<Order | null>(null);
+  const [printDispatch, setPrintDispatch] = useState<Dispatch | null>(null);
 
   useEffect(() => {
     loadOrders();
@@ -50,8 +56,9 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
   const loadOrders = async () => {
     setLoading(true);
     try {
-      const list = await getOrders();
+      const [list, dispatchList] = await Promise.all([getOrders(), getDispatches()]);
       setOrders(list);
+      setDispatches(dispatchList);
     } catch (e) {
       console.error(e);
     } finally {
@@ -67,6 +74,17 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
       console.error(e);
     }
   };
+
+  const handlePrintChallan = (order: Order) => {
+    const orderDispatches = dispatches
+      .filter((dispatch) => dispatch.orderId === order.id || dispatch.orderNumber === order.orderNumber)
+      .sort((a, b) => `${a.dispatchDate}-${a.createdAt}`.localeCompare(`${b.dispatchDate}-${b.createdAt}`));
+    setPrintOrder(order);
+    setPrintDispatch(orderDispatches[orderDispatches.length - 1] || null);
+    setTimeout(() => window.print(), 120);
+  };
+
+  const printProgress = printOrder ? getOrderDeliveryProgress(printOrder, dispatches) : null;
 
   // Unique customer list for dropdown
   const customerNames = Array.from(new Set(orders.map((o) => o.companyName || o.customerName)));
@@ -286,6 +304,16 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                           >
                             <Eye className="w-4 h-4" />
                           </Link>
+                          {order.orderStatus !== 'cancelled' && (
+                            <button
+                              onClick={() => handlePrintChallan(order)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              title={dispatches.some((dispatch) => dispatch.orderId === order.id || dispatch.orderNumber === order.orderNumber) ? 'Print latest sub-challan' : 'Print delivery challan'}
+                              aria-label={`Print delivery challan for ${order.orderNumber}`}
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          )}
                           {!isAS && order.paymentStatus !== 'paid' && (
                             <button
                               onClick={() => onOpenRecordPaymentModal(order.id)}
@@ -324,6 +352,90 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
           </table>
         </div>
       </div>
+
+      {printOrder && printProgress && (
+        <div id="angel-print-sales-challan" style={{ display: 'none' }}>
+          <div style={{ fontFamily: 'Arial, sans-serif', width: '210mm', minHeight: '297mm', padding: '14mm 16mm', boxSizing: 'border-box', color: '#0f172a', background: '#fff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #2563eb', paddingBottom: '12px', marginBottom: '14px' }}>
+              <div>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: '#1e3a8a' }}>ANGEL PET</div>
+                <div style={{ fontSize: '10px', letterSpacing: '2px', color: '#64748b' }}>PACKAGING SOLUTIONS PVT LTD</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '17px', fontWeight: 800, color: '#1e3a8a' }}>
+                  {printDispatch ? 'SUB-DELIVERY CHALLAN' : 'DELIVERY CHALLAN'}
+                </div>
+                <div style={{ fontSize: '10px', marginTop: '5px' }}>
+                  {printDispatch?.dispatchNumber || printOrder.orderNumber}
+                </div>
+                <div style={{ fontSize: '10px', color: '#64748b' }}>
+                  Date: {printDispatch?.dispatchDate || printOrder.orderDate}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '9px', borderRadius: '5px' }}>
+                <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Customer</div>
+                <div style={{ fontWeight: 700, marginTop: '4px' }}>{printOrder.companyName || printOrder.customerName}</div>
+                <div style={{ fontSize: '10px', marginTop: '2px' }}>{printOrder.customerName}</div>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '9px', borderRadius: '5px' }}>
+                <div style={{ fontSize: '8px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Order reference</div>
+                <div style={{ fontWeight: 700, marginTop: '4px' }}>{printOrder.orderNumber}</div>
+                <div style={{ fontSize: '10px', marginTop: '2px' }}>{printDispatch ? 'Latest sub-delivery quantities' : 'Initial delivery quantities'}</div>
+              </div>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+              <thead>
+                <tr style={{ background: '#1e3a8a', color: '#fff' }}>
+                  {['Product', 'Ordered (pcs)', 'Delivered (pcs)', 'Current delivery', 'Remaining (pcs)'].map((heading) => (
+                    <th key={heading} style={{ padding: '8px 6px', textAlign: heading === 'Product' ? 'left' : 'center' }}>{heading}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {printOrder.items.map((orderItem, index) => {
+                  const progress = printProgress.items.find((item) => item.productId === orderItem.productId);
+                  const dispatchItem = printDispatch?.items.find((item) => item.productId === orderItem.productId);
+                  const currentPieces = dispatchItem?.quantity ?? (printDispatch ? 0 : orderItem.quantity);
+                  const displayUnit = dispatchItem?.deliveryUnit || (orderItem.soldByPacket && orderItem.packetCount !== undefined && orderItem.unitsPerPacket ? 'packets' : 'pieces');
+                  const displayQuantity = dispatchItem?.packetQuantity ?? (displayUnit === 'packets' ? orderItem.packetCount : currentPieces);
+                  const unitText = displayUnit === 'packets' && (dispatchItem?.unitsPerPacket || orderItem.unitsPerPacket)
+                    ? `${displayQuantity === 1 ? 'packet' : 'packets'} × ${dispatchItem?.unitsPerPacket || orderItem.unitsPerPacket} pcs + ${dispatchItem?.loosePieces || orderItem.loosePieces || 0} loose`
+                    : 'pieces';
+                  if (printDispatch && !dispatchItem) return null;
+                  return (
+                    <tr key={orderItem.productId} style={{ background: index % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', fontWeight: 700 }}>
+                        {orderItem.productName}<div style={{ fontSize: '8px', fontWeight: 400, color: '#64748b' }}>{unitText}</div>
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', textAlign: 'center' }}>{formatNumberDisplay(orderItem.quantity)}</td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', textAlign: 'center' }}>{formatNumberDisplay(progress?.deliveredQuantity || 0)}</td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 700 }}>
+                        {formatNumberDisplay(displayQuantity)} {displayUnit}
+                        {displayUnit === 'packets' && <span> + {formatNumberDisplay(dispatchItem?.loosePieces ?? orderItem.loosePieces ?? 0)} loose</span>}
+                        {displayUnit === 'packets' && <div style={{ fontSize: '8px', fontWeight: 400 }}>({formatNumberDisplay(currentPieces)} pieces)</div>}
+                      </td>
+                      <td style={{ padding: '8px 6px', borderBottom: '1px solid #e2e8f0', textAlign: 'center' }}>{formatNumberDisplay(progress?.remainingQuantity || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ marginTop: '18px', fontSize: '10px', color: '#475569' }}>
+              Delivery quantities are recorded in pieces for inventory and fulfillment tracking. Packet quantities are shown only when configured on the product/order.
+            </div>
+            {printDispatch && (
+              <div style={{ marginTop: '10px', fontSize: '10px' }}>
+                Vehicle: {printDispatch.vehicleNumber || 'Pending'} &nbsp; | &nbsp; Driver: {printDispatch.driverName || 'Pending'}
+              </div>
+            )}
+            <div style={{ marginTop: '54px', display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+              <span>Authorized Signatory</span><span>Receiver's Signature & Stamp</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

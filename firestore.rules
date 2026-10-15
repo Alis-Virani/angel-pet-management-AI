@@ -27,6 +27,9 @@ service cloud.firestore {
     match /payments/{document} {
       allow read, write: if isSignedIn();
     }
+    match /paymentReminders/{document} {
+      allow read, write: if isSignedIn();
+    }
     match /products/{document} {
       allow read, write: if isSignedIn();
     }

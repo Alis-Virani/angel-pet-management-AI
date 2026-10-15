@@ -288,9 +288,9 @@ export function generateInvoiceHtml(
       const { item, quantity, unitPrice, subtotal, isComponent, componentType, weightDisplay } = expandedItem;
 
       const qtyDisplay =
-        item.soldByPacket && item.packetCount && item.unitsPerPacket
+        item.soldByPacket && item.packetCount !== undefined && item.unitsPerPacket
           ? `<div>${formatNumberDisplay(item.packetCount)} ${item.packetCount === 1 ? 'Packet' : 'Packets'}</div>
-             <div style="font-size: 8px; color: #64748b; font-weight: 500; margin-top: 1px;">(${item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt &bull; Total: ${formatNumberDisplay(quantity)} pcs)</div>`
+             <div style="font-size: 8px; color: #64748b; font-weight: 500; margin-top: 1px;">(${item.unitsPerPacket.toLocaleString('en-IN')} pcs/pkt + ${formatNumberDisplay(item.loosePieces || 0)} loose &bull; Total: ${formatNumberDisplay(quantity)} pcs)</div>`
           : `${formatNumberDisplay(quantity)} pcs`;
 
       const hasInner = Boolean(item.selectedInnerName || item.selectedInnerId);

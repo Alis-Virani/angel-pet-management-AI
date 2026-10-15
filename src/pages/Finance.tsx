@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Order, Payment, Expense, PurchaseOrder, Customer, Settings } from '../types';
-import { getOrders, getPayments, getExpenses, getPurchases, getCustomers, getSettings, deleteExpense } from '../services/db';
+import { Order, Payment, Expense, PurchaseOrder, Customer, Settings, PaymentReminder } from '../types';
+import { getOrders, getPayments, getExpenses, getPurchases, getCustomers, getSettings, deleteExpense, getPaymentReminders, savePaymentReminder } from '../services/db';
 import { StatCard } from '../components/common/StatCard';
 import { Badge } from '../components/common/Badge';
+import { Modal } from '../components/common/Modal';
 import {
   IndianRupee,
   TrendingUp,
@@ -19,7 +20,10 @@ import {
   CalendarDays,
   RefreshCw,
   Filter,
-  BookOpen
+  BookOpen,
+  BellRing,
+  Save,
+  X
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
@@ -31,6 +35,7 @@ interface FinanceProps {
 type StatementFilter = 'all' | 'sales' | 'purchases';
 type DateFilter = 'all' | 'today' | 'week' | 'month' | 'custom';
 type PartyType = 'customer' | 'supplier';
+type ReminderStatus = 'upcoming' | 'due_today' | 'overdue' | 'not_set';
 
 export type DayLedgerType = 'Sale' | 'Customer Payment' | 'Purchase' | 'Supplier Payment' | 'Expense';
 
@@ -92,7 +97,8 @@ export const Finance: React.FC<FinanceProps> = ({
   const [purchases, setPurchases] = useState<PurchaseOrder[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [activeTab, setActiveTab] = useState<'ledger' | 'party' | 'statement' | 'collections' | 'expenses'>('ledger');
+  const [reminders, setReminders] = useState<PaymentReminder[]>([]);
+  const [activeTab, setActiveTab] = useState<'ledger' | 'party' | 'statement' | 'reminders' | 'collections' | 'expenses'>('ledger');
   
   // Day-to-Day Ledger filter states
   const [dayLedgerDateFilter, setDayLedgerDateFilter] = useState<DateFilter>('all');
@@ -122,6 +128,16 @@ export const Finance: React.FC<FinanceProps> = ({
   // Deletion modal state
   const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [reminderStatusFilter, setReminderStatusFilter] = useState<'all' | ReminderStatus>('all');
+  const [reminderDueDateFilter, setReminderDueDateFilter] = useState('');
+  const [reminderCustomerFilter, setReminderCustomerFilter] = useState('all');
+  const [reminderPaymentFilter, setReminderPaymentFilter] = useState<'all' | 'pending' | 'partially_paid'>('all');
+  const [editingReminder, setEditingReminder] = useState<PaymentReminder | null>(null);
+  const [reminderDueDate, setReminderDueDate] = useState('');
+  const [reminderFollowUpDate, setReminderFollowUpDate] = useState('');
+  const [reminderNotes, setReminderNotes] = useState('');
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderError, setReminderError] = useState('');
 
   useEffect(() => {
     loadFinanceData();
@@ -130,13 +146,14 @@ export const Finance: React.FC<FinanceProps> = ({
   const loadFinanceData = async () => {
     setLoading(true);
     try {
-      const [ordList, pymtList, expList, purchaseList, customerList, settingsData] = await Promise.all([
+      const [ordList, pymtList, expList, purchaseList, customerList, settingsData, reminderList] = await Promise.all([
         getOrders(),
         getPayments(),
         getExpenses(),
         getPurchases(),
         getCustomers(),
-        getSettings()
+        getSettings(),
+        getPaymentReminders()
       ]);
       setOrders(ordList);
       setPayments(pymtList);
@@ -144,6 +161,22 @@ export const Finance: React.FC<FinanceProps> = ({
       setPurchases(purchaseList);
       setCustomers(customerList);
       setSettings(settingsData);
+      const activeReminderOrders = ordList.filter((order) => order.orderStatus !== 'cancelled' && order.orderType !== 'AS' && order.totalAmount > order.paidAmount);
+      const existingReminderOrderIds = new Set(reminderList.map((reminder) => reminder.orderId));
+      const missingReminders = activeReminderOrders.filter((order) => !existingReminderOrderIds.has(order.id));
+      const createdReminders = await Promise.all(missingReminders.map((order) => {
+        const customer = customerList.find((item) => item.id === order.customerId);
+        return savePaymentReminder({
+          orderId: order.id,
+          customerId: order.customerId,
+          customerName: order.companyName || order.customerName,
+          phone: customer?.phone || 'Not available',
+          dueDate: order.dueDate,
+          followUpDate: '',
+          notes: ''
+        });
+      }));
+      setReminders([...reminderList, ...createdReminders]);
       setSelectedPartyId((current) => current || customerList[0]?.id || purchaseList[0]?.supplierName || '');
     } catch (e) {
       console.error('Error loading finance data:', e);
@@ -174,10 +207,65 @@ export const Finance: React.FC<FinanceProps> = ({
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const netBalance = totalCollections - totalExpenses;
 
+  const todayKey = toDateKey(new Date());
   const paymentTotalsByOrder = payments.reduce<Record<string, number>>((totals, payment) => {
     totals[payment.orderId] = (totals[payment.orderId] || 0) + payment.amount;
     return totals;
   }, {});
+
+  const reminderRows = reminders
+    .map((reminder) => {
+      const order = orders.find((item) => item.id === reminder.orderId);
+      if (!order || order.orderStatus === 'cancelled' || order.orderType === 'AS') return null;
+      const paid = paymentTotalsByOrder[order.id] ?? order.paidAmount;
+      const outstanding = Math.max(0, order.totalAmount - paid);
+      if (outstanding <= 0) return null;
+      const daysOverdue = reminder.dueDate && reminder.dueDate < todayKey
+        ? Math.floor((Date.parse(`${todayKey}T00:00:00`) - Date.parse(`${reminder.dueDate}T00:00:00`)) / 86400000)
+        : 0;
+      const status: ReminderStatus = !reminder.dueDate
+        ? 'not_set'
+        : reminder.dueDate < todayKey ? 'overdue' : reminder.dueDate === todayKey ? 'due_today' : 'upcoming';
+      return { reminder, order, outstanding, daysOverdue, status };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .filter((row) => reminderStatusFilter === 'all' || row.status === reminderStatusFilter)
+    .filter((row) => !reminderDueDateFilter || row.reminder.dueDate === reminderDueDateFilter)
+    .filter((row) => reminderCustomerFilter === 'all' || row.reminder.customerId === reminderCustomerFilter)
+    .filter((row) => reminderPaymentFilter === 'all' || row.order.paymentStatus === reminderPaymentFilter);
+
+  const openReminderEditor = (reminder: PaymentReminder) => {
+    setEditingReminder(reminder);
+    setReminderDueDate(reminder.dueDate || '');
+    setReminderFollowUpDate(reminder.followUpDate || '');
+    setReminderNotes(reminder.notes || '');
+    setReminderError('');
+  };
+
+  const handleReminderSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingReminder) return;
+    setReminderSaving(true);
+    setReminderError('');
+    try {
+      const updated = await savePaymentReminder({
+        orderId: editingReminder.orderId,
+        customerId: editingReminder.customerId,
+        customerName: editingReminder.customerName,
+        phone: editingReminder.phone,
+        dueDate: reminderDueDate || undefined,
+        followUpDate: reminderFollowUpDate || undefined,
+        notes: reminderNotes.trim() || undefined
+      });
+      setReminders((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setEditingReminder(null);
+    } catch (error) {
+      console.error('Failed to save payment reminder:', error);
+      setReminderError(error instanceof Error ? error.message : 'Failed to save reminder.');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
 
   // ── Build Company-Level Day-to-Day Ledger from Real System Data ──────────
   const rawDayLedger: Array<Omit<DayLedgerRow, 'balance'>> = [];
@@ -337,7 +425,7 @@ export const Finance: React.FC<FinanceProps> = ({
 
   const dayLedgerTotalDebit = filteredDayLedgerRows.reduce((sum, row) => sum + row.debit, 0);
   const dayLedgerTotalCredit = filteredDayLedgerRows.reduce((sum, row) => sum + row.credit, 0);
-  const dayLedgerClosingBalance = dayLedgerTotalDebit - dayLedgerTotalCredit;
+  const dayLedgerClosingBalance = filteredDayLedgerRows[filteredDayLedgerRows.length - 1]?.balance || 0;
 
   const dayLedgerPartyOptions = Array.from(
     new Set(
@@ -569,23 +657,26 @@ export const Finance: React.FC<FinanceProps> = ({
       });
   }
 
-  const filteredPartyLedger = partyLedgerBase
-    .filter((row) => {
-      if (partyDateFilter === 'all') return true;
-      if (partyDateFilter === 'today') return row.date === today;
-      if (partyDateFilter === 'month') return row.date >= monthStart && row.date <= today;
-      return (!partyStartDate || row.date >= partyStartDate) && (!partyEndDate || row.date <= partyEndDate);
-    })
+  const sortedPartyLedger = [...partyLedgerBase]
     .sort((first, second) => {
       if (!first.date && second.date) return 1;
       if (first.date && !second.date) return -1;
       return first.date.localeCompare(second.date) || (first.transaction === 'Sale' || first.transaction === 'Purchase' ? -1 : 1);
     });
   let runningBalance = 0;
-  const partyLedgerRows: PartyLedgerRow[] = filteredPartyLedger.map((row) => {
+  const partyLedgerWithBalance: PartyLedgerRow[] = sortedPartyLedger.map((row) => {
     runningBalance += row.debit - row.credit;
     return { ...row, balance: runningBalance };
   });
+
+  const filteredPartyLedger = partyLedgerWithBalance
+    .filter((row) => {
+      if (partyDateFilter === 'all') return true;
+      if (partyDateFilter === 'today') return row.date === today;
+      if (partyDateFilter === 'month') return row.date >= monthStart && row.date <= today;
+      return (!partyStartDate || row.date >= partyStartDate) && (!partyEndDate || row.date <= partyEndDate);
+    });
+  const partyLedgerRows = filteredPartyLedger;
   const partySummary = {
     debit: partyLedgerRows.reduce((sum, row) => sum + row.debit, 0),
     credit: partyLedgerRows.reduce((sum, row) => sum + row.credit, 0),
@@ -707,6 +798,17 @@ export const Finance: React.FC<FinanceProps> = ({
               }`}
             >
               {t('Sales & Purchase Statement')}
+            </button>
+            <button
+              onClick={() => setActiveTab('reminders')}
+              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+                activeTab === 'reminders'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BellRing className="w-3.5 h-3.5 text-amber-600" />
+              <span>{t('Collection Reminders')} ({reminderRows.length})</span>
             </button>
             <button
               onClick={() => setActiveTab('collections')}
@@ -1087,6 +1189,99 @@ export const Finance: React.FC<FinanceProps> = ({
               </table>
             </div>
           </div>
+        ) : activeTab === 'reminders' ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {([
+                ['upcoming', 'Upcoming', 'text-blue-700', 'bg-blue-50/70 border-blue-100/80'],
+                ['due_today', 'Due today', 'text-amber-700', 'bg-amber-50/70 border-amber-100/80'],
+                ['overdue', 'Overdue', 'text-rose-700', 'bg-rose-50/70 border-rose-100/80']
+              ] as const).map(([status, label, textColor, background]) => (
+                <button key={status} onClick={() => setReminderStatusFilter(status)} className={`p-4 rounded-xl border text-left ${background}`}>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
+                  <div className={`text-lg font-bold mt-1 ${textColor}`}>{reminders.filter((reminder) => {
+                    const dueDate = reminder.dueDate;
+                    return dueDate && (status === 'overdue' ? dueDate < todayKey : status === 'due_today' ? dueDate === todayKey : dueDate > todayKey);
+                  }).length}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Open reminders</div>
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div>
+                <label className="form-label">Due date</label>
+                <select value={reminderStatusFilter} onChange={(event) => setReminderStatusFilter(event.target.value as typeof reminderStatusFilter)} className="form-select">
+                  <option value="all">All dates</option>
+                  <option value="upcoming">Upcoming</option>
+                  <option value="due_today">Due today</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="not_set">Not set</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Exact due date</label>
+                <input type="date" value={reminderDueDateFilter} onChange={(event) => setReminderDueDateFilter(event.target.value)} className="form-input" />
+              </div>
+              <div>
+                <label className="form-label">Customer</label>
+                <select value={reminderCustomerFilter} onChange={(event) => setReminderCustomerFilter(event.target.value)} className="form-select">
+                  <option value="all">All customers</option>
+                  {customers.filter((customer) => reminders.some((reminder) => reminder.customerId === customer.id)).map((customer) => (
+                    <option key={customer.id} value={customer.id}>{customer.company || customer.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Payment status</label>
+                <select value={reminderPaymentFilter} onChange={(event) => setReminderPaymentFilter(event.target.value as typeof reminderPaymentFilter)} className="form-select">
+                  <option value="all">All outstanding</option>
+                  <option value="pending">Pending</option>
+                  <option value="partially_paid">Partially paid</option>
+                </select>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-y border-slate-200/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3 px-4">Customer</th>
+                    <th className="py-3 px-4">Contact</th>
+                    <th className="py-3 px-4 text-right">Outstanding</th>
+                    <th className="py-3 px-4">Due date</th>
+                    <th className="py-3 px-4">Days overdue</th>
+                    <th className="py-3 px-4">Payment status</th>
+                    <th className="py-3 px-4">Follow-up</th>
+                    <th className="py-3 px-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {reminderRows.length === 0 ? (
+                    <tr><td colSpan={8} className="py-12 text-center text-slate-400">No collection reminders match the selected filters.</td></tr>
+                  ) : reminderRows.map(({ reminder, order, outstanding, daysOverdue, status }) => (
+                    <tr key={reminder.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-slate-900">{reminder.customerName}</div>
+                        <div className="text-[10px] text-slate-400">{order.orderNumber}</div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">{reminder.phone}</td>
+                      <td className="py-3 px-4 text-right font-bold text-rose-600 whitespace-nowrap">{formatCurrency(outstanding)}</td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        {status === 'not_set' ? <span className="text-amber-600 font-semibold">Not set</span> : reminder.dueDate}
+                      </td>
+                      <td className="py-3 px-4">{daysOverdue > 0 ? <span className="font-semibold text-rose-600">{daysOverdue}</span> : '—'}</td>
+                      <td className="py-3 px-4"><Badge status={order.paymentStatus} /></td>
+                      <td className="py-3 px-4 text-slate-500">{reminder.followUpDate || '—'}</td>
+                      <td className="py-3 px-4 text-right">
+                        <button onClick={() => openReminderEditor(reminder)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
+                          <CalendarDays className="w-3.5 h-3.5" /> Manage
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : activeTab === 'collections' ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -1235,6 +1430,44 @@ export const Finance: React.FC<FinanceProps> = ({
         </div>
       )}
 
+      <Modal
+        isOpen={Boolean(editingReminder)}
+        onClose={() => setEditingReminder(null)}
+        title="Manage Collection Reminder"
+        subtitle="Authorized users can set a due date and record follow-up details"
+        maxWidth="md"
+      >
+        <form onSubmit={handleReminderSave} className="space-y-4">
+          {reminderError && <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">{reminderError}</div>}
+          {editingReminder && (
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
+              <div className="font-semibold text-slate-900">{editingReminder.customerName}</div>
+              <div className="text-slate-500">{editingReminder.phone} · Order {orders.find((order) => order.id === editingReminder.orderId)?.orderNumber || editingReminder.orderId}</div>
+            </div>
+          )}
+          <div>
+            <label className="form-label">Payment due date</label>
+            <input type="date" value={reminderDueDate} onChange={(event) => setReminderDueDate(event.target.value)} className="form-input" />
+            <p className="text-[11px] text-slate-500 mt-1">Leave blank when the source records do not specify a due date.</p>
+          </div>
+          <div>
+            <label className="form-label">Follow-up date</label>
+            <input type="date" value={reminderFollowUpDate} onChange={(event) => setReminderFollowUpDate(event.target.value)} className="form-input" />
+          </div>
+          <div>
+            <label className="form-label">Follow-up notes</label>
+            <textarea value={reminderNotes} onChange={(event) => setReminderNotes(event.target.value)} className="form-textarea" rows={3} placeholder="Add collection conversation notes..." />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onClick={() => setEditingReminder(null)} className="btn-secondary"><X className="w-3.5 h-3.5" /> Cancel</button>
+            <button type="submit" disabled={reminderSaving} className="btn-primary !bg-blue-600 hover:!bg-blue-700 disabled:opacity-50">
+              {reminderSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {reminderSaving ? 'Saving...' : 'Save reminder'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Printable Company Day-to-Day Ledger */}
       <div id="angel-print-ledger" className="hidden">
         <div className="p-8 text-slate-900 bg-white font-sans">
@@ -1370,4 +1603,3 @@ export const Finance: React.FC<FinanceProps> = ({
     </div>
   );
 };
-
