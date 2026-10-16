@@ -23,6 +23,7 @@ const getDb = (): NonNullable<typeof db> => {
 };
 import type {
   Customer,
+  Supplier,
   Product,
   Order,
   Payment,
@@ -62,6 +63,7 @@ import { toBaseQuantity } from '../utils/unitConversion';
 // LocalStorage Keys for fallback
 const STORAGE_KEYS = {
   CUSTOMERS: 'angel_pet_customers',
+  SUPPLIERS: 'angel_pet_suppliers',
   PRODUCTS: 'angel_pet_products',
   ORDERS: 'angel_pet_orders',
   DISPATCHES: 'angel_pet_dispatches',
@@ -88,6 +90,7 @@ function getLocalItem<T>(key: string, fallback: T): T {
     console.error(`Error reading ${key} from localStorage:`, e);
     return fallback;
   }
+
 }
 
 function setLocalItem<T>(key: string, value: T): void {
@@ -389,6 +392,87 @@ export async function deleteCustomer(id: string): Promise<void> {
   if (shouldSyncToFirebase()) {
     withTimeout(deleteDoc(doc(getDb(), 'customers', id)), 2500).catch((e) =>
       console.error('Error deleting customer in Firebase:', e)
+    );
+  }
+}
+
+// ================= SUPPLIERS =================
+export async function getSuppliers(): Promise<Supplier[]> {
+  const purchases = await getPurchases();
+  const saved = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+  const byCompany = new Map(saved.map((supplier) => [supplier.company.toLowerCase(), supplier]));
+  const suppliers = new Map<string, Supplier>();
+
+  purchases.forEach((purchase) => {
+    const company = purchase.supplierName?.trim();
+    if (!company) return;
+    const key = company.toLowerCase();
+    const existing = byCompany.get(key);
+    const related = purchases.filter((item) => item.supplierName?.trim().toLowerCase() === key);
+    const totalPurchases = related.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
+    const totalPaid = related.reduce((sum, item) => sum + (item.paidAmount || 0), 0);
+    suppliers.set(key, {
+      id: existing?.id || `SUP-${company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`,
+      name: existing?.name || company,
+      company,
+      phone: existing?.phone || purchase.supplierPhone || '',
+      address: existing?.address || '',
+      status: existing?.status || 'active',
+      createdAt: existing?.createdAt || purchase.purchaseDate || new Date().toISOString().split('T')[0],
+      totalPurchases,
+      totalPaid,
+      totalOutstanding: Math.max(0, totalPurchases - totalPaid)
+    });
+  });
+
+  saved.forEach((supplier) => {
+    if (!suppliers.has(supplier.company.toLowerCase())) suppliers.set(supplier.company.toLowerCase(), supplier);
+  });
+
+  const result = Array.from(suppliers.values());
+  setLocalItem(STORAGE_KEYS.SUPPLIERS, result);
+  return result;
+}
+
+export async function addSupplier(data: Omit<Supplier, 'id' | 'createdAt' | 'totalPurchases' | 'totalPaid' | 'totalOutstanding'>): Promise<Supplier> {
+  const supplier: Supplier = {
+    ...data,
+    id: `SUP-${Date.now().toString().slice(-8)}`,
+    createdAt: new Date().toISOString().split('T')[0],
+    totalPurchases: 0,
+    totalPaid: 0,
+    totalOutstanding: 0
+  };
+  const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+  setLocalItem(STORAGE_KEYS.SUPPLIERS, [supplier, ...list]);
+  if (shouldSyncToFirebase()) {
+    withTimeout(setDoc(doc(getDb(), 'suppliers', supplier.id), supplier), 2500).catch((e) =>
+      console.error('Error adding supplier to Firebase:', e)
+    );
+  }
+  return supplier;
+}
+
+export async function updateSupplier(id: string, updates: Partial<Supplier>): Promise<Supplier> {
+  const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+  const current = list.find((supplier) => supplier.id === id);
+  if (!current) throw new Error('Supplier not found.');
+  const updated = { ...current, ...updates };
+  setLocalItem(STORAGE_KEYS.SUPPLIERS, list.map((supplier) => supplier.id === id ? updated : supplier));
+  if (shouldSyncToFirebase()) {
+    withTimeout(setDoc(doc(getDb(), 'suppliers', id), updated, { merge: true }), 2500).catch((e) =>
+      console.error('Error updating supplier in Firebase:', e)
+    );
+  }
+  return updated;
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+  setLocalItem(STORAGE_KEYS.SUPPLIERS, list.filter((supplier) => supplier.id !== id));
+  if (shouldSyncToFirebase()) {
+    withTimeout(deleteDoc(doc(getDb(), 'suppliers', id)), 2500).catch((e) =>
+      console.error('Error deleting supplier in Firebase:', e)
     );
   }
 }

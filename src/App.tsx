@@ -6,6 +6,8 @@ import { SalesOrders } from './pages/SalesOrders';
 import { OrderDetails } from './pages/OrderDetails';
 import { Customers } from './pages/Customers';
 import { CustomerProfile } from './pages/CustomerProfile';
+import { Suppliers } from './pages/Suppliers';
+import { SupplierProfile } from './pages/SupplierProfile';
 import { Analytics } from './pages/Analytics';
 import { ProductDirectory } from './pages/ProductDirectory';
 import { FinishedGoods } from './pages/FinishedGoods';
@@ -21,6 +23,7 @@ import { SettingsPage } from './pages/SettingsPage';
 // Modals
 import { NewOrderModal } from './components/modals/NewOrderModal';
 import { AddCustomerModal } from './components/modals/AddCustomerModal';
+import { AddSupplierModal } from './components/modals/AddSupplierModal';
 import { AddProductModal } from './components/modals/AddProductModal';
 import { RecordPaymentModal } from './components/modals/RecordPaymentModal';
 import { AddExpenseModal } from './components/modals/AddExpenseModal';
@@ -30,7 +33,7 @@ import { AddRawMaterialModal } from './components/modals/AddRawMaterialModal';
 import { UploadDocumentModal } from './components/modals/UploadDocumentModal';
 import { NewPurchaseModal } from './components/modals/NewPurchaseModal';
 import { RecordPurchasePaymentModal } from './components/modals/RecordPurchasePaymentModal';
-import { ProductType, Customer, Product, RawMaterial } from './types';
+import { ProductType, Customer, Product, RawMaterial, Supplier } from './types';
 import { useTranslation } from './i18n';
 
 export function App() {
@@ -40,6 +43,8 @@ export function App() {
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
 
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -83,6 +88,11 @@ export function App() {
   const openAddCustomer = (customer?: Customer) => {
     setEditingCustomer(customer || null);
     setIsAddCustomerOpen(true);
+  };
+
+  const openAddSupplier = (supplier?: Supplier) => {
+    setEditingSupplier(supplier || null);
+    setIsAddSupplierOpen(true);
   };
 
   const openAddProduct = (type: ProductType = 'bottle', product?: Product) => {
@@ -165,6 +175,11 @@ export function App() {
               />
             }
           />
+          <Route
+            path="/suppliers"
+            element={<Suppliers key={`sup-${refreshKey}`} onOpenAddSupplierModal={(supplier) => openAddSupplier(supplier)} />}
+          />
+          <Route path="/suppliers/:supplierId" element={<SupplierProfile key={`supprof-${refreshKey}`} />} />
           <Route path="/analytics" element={<Analytics key={`analytic-${refreshKey}`} />} />
           <Route
             path="/products"
@@ -260,6 +275,15 @@ export function App() {
         }}
         initialCustomer={editingCustomer}
         onCustomerAdded={triggerRefresh}
+      />
+      <AddSupplierModal
+        isOpen={isAddSupplierOpen}
+        onClose={() => {
+          setIsAddSupplierOpen(false);
+          setEditingSupplier(null);
+        }}
+        initialSupplier={editingSupplier}
+        onSupplierSaved={triggerRefresh}
       />
       <AddProductModal
         isOpen={isAddProductOpen}

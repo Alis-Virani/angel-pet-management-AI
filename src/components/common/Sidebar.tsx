@@ -34,6 +34,7 @@ const navItems = [
   { path: '/purchases', label: 'Purchases', icon: ShoppingBag },
   { path: '/purchased-materials', label: 'Purchased Materials', icon: Warehouse },
   { path: '/customers', label: 'Customers', icon: Users },
+  { path: '/suppliers', label: 'Suppliers', icon: Truck },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/products', label: 'Product Directory', icon: Package },
   { path: '/finished-goods', label: 'Finished Goods', icon: Boxes },

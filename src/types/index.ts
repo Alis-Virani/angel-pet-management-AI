@@ -17,6 +17,21 @@ export interface Customer {
   gstin?: string;
 }
 
+export type SupplierStatus = 'active' | 'inactive';
+
+export interface Supplier {
+  id: string;
+  name: string;
+  company: string;
+  phone: string;
+  address: string;
+  status: SupplierStatus;
+  createdAt: string;
+  totalPurchases: number;
+  totalPaid: number;
+  totalOutstanding: number;
+}
+
 export type ProductType = 'bottle' | 'cap' | 'inner';
 export type ProductStatus = 'active' | 'inactive';
 
