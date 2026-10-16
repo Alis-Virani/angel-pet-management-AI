@@ -359,16 +359,16 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
       {/* ── VIEW CHALLAN MODAL ──────────────────────────────────────────── */}
       {viewChallan && printOrder && printProgress && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="print-challan-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(4px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setViewChallan(false); }}
         >
           <div
-            className="relative bg-white rounded-2xl shadow-2xl flex flex-col"
+            className="print-challan-modal relative bg-white rounded-2xl shadow-2xl flex flex-col"
             style={{ width: '820px', maxWidth: '100%', maxHeight: '92vh' }}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+            <div className="print-challan-header flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
               <div>
                 <h2 className="text-base font-bold text-slate-900">
                   {printDispatch ? 'Sub-Delivery Challan' : 'Delivery Challan'}
@@ -396,9 +396,10 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
             </div>
 
             {/* Challan Preview Body */}
-            <div className="overflow-y-auto flex-1 bg-slate-100 p-6">
+            <div className="print-challan-body overflow-y-auto flex-1 bg-slate-100 p-6">
               <div
                 ref={challanPrintRef}
+                className="print-challan-sheet"
                 style={{
                   fontFamily: "'Arial', 'Helvetica Neue', sans-serif",
                   width: '210mm',
@@ -459,6 +460,50 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                         🚛 Vehicle: {printDispatch.vehicleNumber || '—'} &nbsp;|&nbsp; Driver: {printDispatch.driverName || '—'}
                       </div>
                     )}
+                    <style>{`
+                      @media print {
+                        body * {
+                          visibility: hidden !important;
+                        }
+
+                        .print-challan-overlay,
+                        .print-challan-overlay * {
+                          visibility: visible !important;
+                        }
+
+                        .print-challan-overlay {
+                          position: absolute !important;
+                          inset: 0 !important;
+                          display: block !important;
+                          padding: 0 !important;
+                          background: #fff !important;
+                        }
+
+                        .print-challan-modal {
+                          width: 100% !important;
+                          max-width: none !important;
+                          max-height: none !important;
+                          display: block !important;
+                          box-shadow: none !important;
+                        }
+
+                        .print-challan-header {
+                          display: none !important;
+                        }
+
+                        .print-challan-body {
+                          overflow: visible !important;
+                          padding: 0 !important;
+                          background: #fff !important;
+                        }
+
+                        .print-challan-sheet {
+                          margin: 0 auto !important;
+                          box-shadow: none !important;
+                          border-radius: 0 !important;
+                        }
+                      }
+                    `}</style>
                   </div>
                 </div>
 
