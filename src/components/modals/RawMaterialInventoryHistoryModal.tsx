@@ -65,7 +65,7 @@ export const RawMaterialInventoryHistoryModal: React.FC<RawMaterialInventoryHist
       wastage1: usage.wastage1,
       wastage2: usage.wastage2,
       totalDeduction: usage.totalDeduction || usage.quantity || 0,
-      convertedQuantity: usage.baseQuantity || usage.quantity || 0,
+      convertedQuantity: usage.baseTotalDeduction || usage.baseQuantity || usage.quantity || 0,
       convertedUnit: usage.baseUnit || usage.unit || material.baseUnit || 'kg',
       equivalentPieces: usage.equivalentPieces,
       source: 'Production Consumption',

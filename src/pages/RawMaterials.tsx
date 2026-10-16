@@ -5,7 +5,6 @@ import { Badge } from '../components/common/Badge';
 import { RawMaterialInventoryHistoryModal } from '../components/modals/RawMaterialInventoryHistoryModal';
 import { getStockInBothUnits, formatQuantityWithUnit } from '../utils/unitConversion';
 import {
-  MinusCircle,
   Search,
   Trash2,
   ShoppingBag,
@@ -15,12 +14,10 @@ import { useTranslation } from '../i18n';
 
 interface RawMaterialsProps {
   onOpenAddRawMaterialModal?: (material?: RawMaterial) => void;
-  onOpenRecordMaterialUsageModal: () => void;
   onOpenNewPurchaseModal?: () => void;
 }
 
 export const RawMaterials: React.FC<RawMaterialsProps> = ({
-  onOpenRecordMaterialUsageModal,
   onOpenNewPurchaseModal
 }) => {
   const { t, confirm } = useTranslation();
@@ -93,13 +90,6 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
               <span>{t('Record Purchase')}</span>
             </button>
           )}
-          <button
-            onClick={onOpenRecordMaterialUsageModal}
-            className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl transition-colors flex items-center space-x-1.5"
-          >
-            <MinusCircle className="w-4 h-4 text-amber-400" />
-            <span>{t('Record Usage')}</span>
-          </button>
         </div>
       </div>
 
@@ -264,9 +254,9 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
                       -{typeof u.totalDeduction === 'number' ? u.totalDeduction.toLocaleString() : (u.quantity ?? 0).toLocaleString()} {u.unit || ''}
                     </td>
                     <td className="py-3 px-4 text-slate-600">
-                      {typeof u.baseQuantity === 'number' && u.baseUnit && u.baseQuantity !== u.quantity ? (
+                      {typeof (u.baseTotalDeduction ?? u.baseQuantity) === 'number' && u.baseUnit && (u.baseTotalDeduction ?? u.baseQuantity) !== u.totalDeduction ? (
                         <span className="text-blue-600">
-                          -{formatQuantityWithUnit(u.baseQuantity, u.baseUnit)}
+                          -{formatQuantityWithUnit(u.baseTotalDeduction ?? u.baseQuantity, u.baseUnit)}
                         </span>
                       ) : (
                         <span className="text-slate-400">-</span>

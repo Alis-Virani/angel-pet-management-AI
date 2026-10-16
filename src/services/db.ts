@@ -57,6 +57,7 @@ import {
   initialPurchases
 } from '../data/seedData';
 import { getOrderDeliveryProgress, generateNextChallanNumber } from '../utils/dispatchUtils';
+import { toBaseQuantity } from '../utils/unitConversion';
 
 // LocalStorage Keys for fallback
 const STORAGE_KEYS = {
@@ -202,8 +203,27 @@ function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
 
 // Ensure database is seeded with initial data on first load
 export async function seedDatabase(force = false): Promise<void> {
-  await firebaseReady;
   const isAlreadyInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
+
+  // Initialize the local fallback before any asynchronous Firebase work so a
+  // user write cannot be overwritten when remote seeding completes.
+  if (!isAlreadyInitialized || force) {
+    setLocalItem(STORAGE_KEYS.CUSTOMERS, initialCustomers);
+    setLocalItem(STORAGE_KEYS.PRODUCTS, initialProducts);
+    setLocalItem(STORAGE_KEYS.ORDERS, initialOrders);
+    setLocalItem(STORAGE_KEYS.DISPATCHES, initialDispatches);
+    setLocalItem(STORAGE_KEYS.PAYMENTS, initialPayments);
+    setLocalItem(STORAGE_KEYS.EXPENSES, initialExpenses);
+    setLocalItem(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
+    setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, initialRawMaterialUsage);
+    setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, initialFinishedGoodsLogs);
+    setLocalItem(STORAGE_KEYS.DOCUMENTS, initialDocuments);
+    setLocalItem(STORAGE_KEYS.SETTINGS, initialSettings);
+    setLocalItem(STORAGE_KEYS.PURCHASES, initialPurchases);
+    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
+  }
+
+  await firebaseReady;
 
   if (isLiveFirebaseConfigured && db) {
     try {
@@ -264,21 +284,6 @@ export async function seedDatabase(force = false): Promise<void> {
     }
   }
 
-  if (!isAlreadyInitialized || force) {
-    setLocalItem(STORAGE_KEYS.CUSTOMERS, initialCustomers);
-    setLocalItem(STORAGE_KEYS.PRODUCTS, initialProducts);
-    setLocalItem(STORAGE_KEYS.ORDERS, initialOrders);
-    setLocalItem(STORAGE_KEYS.DISPATCHES, initialDispatches);
-    setLocalItem(STORAGE_KEYS.PAYMENTS, initialPayments);
-    setLocalItem(STORAGE_KEYS.EXPENSES, initialExpenses);
-    setLocalItem(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
-    setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, initialRawMaterialUsage);
-    setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, initialFinishedGoodsLogs);
-    setLocalItem(STORAGE_KEYS.DOCUMENTS, initialDocuments);
-    setLocalItem(STORAGE_KEYS.SETTINGS, initialSettings);
-    setLocalItem(STORAGE_KEYS.PURCHASES, initialPurchases);
-    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-  }
 }
 
 // Run seed check immediately
@@ -1166,43 +1171,28 @@ export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>)
   // Get material to handle unit conversion
   const materials = await getRawMaterials();
   const material = materials.find((m) => m.id === data.materialId);
-  
-  let baseQuantity = data.quantity;
-  let baseUnit = data.unit;
-  let equivalentPieces: number | undefined = undefined;
+  if (!material) {
+    throw new Error('Raw material not found.');
+  }
   
   // Calculate total deduction for stock (consumed + wastage1 + wastage2)
   const totalDeductionInput = data.totalDeduction || data.quantity;
-  let baseTotalDeduction = totalDeductionInput;
-  
-  if (material) {
-    // Convert to base unit if conversion factor is available
-    if (material.conversionFactor && material.conversionFactor > 0) {
-      // If unit is purchase unit, convert to base
-      if (data.unit.toLowerCase() === material.purchaseUnit.toLowerCase()) {
-        baseQuantity = data.quantity * material.conversionFactor;
-        baseTotalDeduction = totalDeductionInput * material.conversionFactor;
-        baseUnit = material.baseUnit;
-      }
-      // If unit is already base or consumption unit, no conversion needed
-      else if (data.unit.toLowerCase() === material.baseUnit.toLowerCase() ||
-               data.unit.toLowerCase() === material.consumptionUnit.toLowerCase()) {
-        baseQuantity = data.quantity;
-        baseTotalDeduction = totalDeductionInput;
-        baseUnit = material.baseUnit;
-      }
-    }
-    
-    // Calculate equivalent pieces if conversion exists (based on total deduction)
-    if (material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0) {
-      equivalentPieces = baseTotalDeduction * material.piecesPerBaseUnit;
-    }
+  const baseQuantity = toBaseQuantity(data.quantity, data.unit, material);
+  const baseTotalDeduction = toBaseQuantity(totalDeductionInput, data.unit, material);
+  const baseUnit = material.baseUnit || material.unit;
+  const equivalentPieces = material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0
+    ? baseTotalDeduction * material.piecesPerBaseUnit
+    : undefined;
+
+  if (baseTotalDeduction > material.currentStock) {
+    throw new Error(`Insufficient stock. Available: ${material.currentStock} ${baseUnit}.`);
   }
   
   const newUsage: RawMaterialUsage = {
     ...data,
     id,
     baseQuantity,
+    baseTotalDeduction,
     baseUnit,
     equivalentPieces,
     createdAt: new Date().toISOString()

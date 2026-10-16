@@ -27,7 +27,6 @@ import { AddExpenseModal } from './components/modals/AddExpenseModal';
 import { NewDispatchModal } from './components/modals/NewDispatchModal';
 import { AddFinishedGoodsModal } from './components/modals/AddFinishedGoodsModal';
 import { AddRawMaterialModal } from './components/modals/AddRawMaterialModal';
-import { RecordMaterialUsageModal } from './components/modals/RecordMaterialUsageModal';
 import { UploadDocumentModal } from './components/modals/UploadDocumentModal';
 import { NewPurchaseModal } from './components/modals/NewPurchaseModal';
 import { RecordPurchasePaymentModal } from './components/modals/RecordPurchasePaymentModal';
@@ -56,7 +55,6 @@ export function App() {
   const [isAddRawMaterialOpen, setIsAddRawMaterialOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<RawMaterial | null>(null);
 
-  const [isRecordMaterialUsageOpen, setIsRecordMaterialUsageOpen] = useState(false);
   const [isUploadDocumentOpen, setIsUploadDocumentOpen] = useState(false);
 
   const [isNewPurchaseOpen, setIsNewPurchaseOpen] = useState(false);
@@ -212,7 +210,6 @@ export function App() {
             element={
               <RawMaterials
                 key={`rm-${refreshKey}`}
-                onOpenRecordMaterialUsageModal={() => setIsRecordMaterialUsageOpen(true)}
                 onOpenNewPurchaseModal={() => setIsNewPurchaseOpen(true)}
               />
             }
@@ -298,11 +295,6 @@ export function App() {
         isOpen={isAddFinishedGoodsOpen}
         onClose={() => setIsAddFinishedGoodsOpen(false)}
         onStockAdded={triggerRefresh}
-      />
-      <RecordMaterialUsageModal
-        isOpen={isRecordMaterialUsageOpen}
-        onClose={() => setIsRecordMaterialUsageOpen(false)}
-        onUsageRecorded={triggerRefresh}
       />
       <UploadDocumentModal
         isOpen={isUploadDocumentOpen}

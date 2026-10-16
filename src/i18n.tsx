@@ -509,7 +509,6 @@ const gujarati: Record<string, string> = {
   , 'Raw Material Inventory': 'કાચા માલનો સ્ટોક'
   , 'Stock levels are automatically maintained from Purchases incoming receipts': 'ખરીદીની આવકની રસીદોથી સ્ટોકનું સ્તર આપમેળે જાળવવામાં આવે છે'
   , 'Record Purchase': 'ખરીદી નોંધો'
-  , 'Record Usage': 'વપરાશ નોંધો'
   , 'Live stock tracking and low-material warning limits': 'લાઇવ સ્ટોક ટ્રેકિંગ અને ઓછા માલની ચેતવણી મર્યાદા'
   , 'Search granules or codes...': 'ગ્રેન્યુલ્સ અથવા કોડ શોધો...'
   , 'Minimum Stock': 'લઘુત્તમ સ્ટોક'

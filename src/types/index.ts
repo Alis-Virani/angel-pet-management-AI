@@ -245,6 +245,7 @@ export interface RawMaterialUsage {
   quantity: number;
   unit: string;
   baseQuantity?: number; // converted to base unit
+  baseTotalDeduction?: number; // total consumption including wastage, converted to base unit
   baseUnit?: string;
   equivalentPieces?: number; // equivalent pieces if conversion exists
   wastage1?: number; // first wastage amount
