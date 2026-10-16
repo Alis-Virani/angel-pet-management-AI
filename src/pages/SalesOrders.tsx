@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Dispatch, Order, OrderStatus, PaymentStatus, PriceCategory } from '../types';
 import { getDispatches, getOrders, updateOrderStatus } from '../services/db';
@@ -9,17 +9,13 @@ import { Badge } from '../components/common/Badge';
 import {
   Search,
   Plus,
-  Filter,
   Eye,
   IndianRupee,
   Truck,
-  CheckCircle,
-  Clock,
-  ArrowUpDown,
-  FileSpreadsheet,
   XCircle,
-  Building2
-  , Printer
+  Building2,
+  Printer,
+  X
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
@@ -48,6 +44,8 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
   const [printDispatch, setPrintDispatch] = useState<Dispatch | null>(null);
+  const [viewChallan, setViewChallan] = useState(false);
+  const challanPrintRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadOrders();
@@ -75,12 +73,17 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
     }
   };
 
-  const handlePrintChallan = (order: Order) => {
+  const handleViewChallan = (order: Order) => {
     const orderDispatches = dispatches
       .filter((dispatch) => dispatch.orderId === order.id || dispatch.orderNumber === order.orderNumber)
       .sort((a, b) => `${a.dispatchDate}-${a.createdAt}`.localeCompare(`${b.dispatchDate}-${b.createdAt}`));
     setPrintOrder(order);
     setPrintDispatch(orderDispatches[orderDispatches.length - 1] || null);
+    setViewChallan(true);
+  };
+
+  const handlePrintFromModal = () => {
+    setViewChallan(false);
     setTimeout(() => window.print(), 120);
   };
 
@@ -306,10 +309,10 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                           </Link>
                           {order.orderStatus !== 'cancelled' && (
                             <button
-                              onClick={() => handlePrintChallan(order)}
+                              onClick={() => handleViewChallan(order)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                              title={dispatches.some((dispatch) => dispatch.orderId === order.id || dispatch.orderNumber === order.orderNumber) ? 'Print latest sub-challan' : 'Print delivery challan'}
-                              aria-label={`Print delivery challan for ${order.orderNumber}`}
+                              title={dispatches.some((dispatch) => dispatch.orderId === order.id || dispatch.orderNumber === order.orderNumber) ? 'View / Print latest sub-challan' : 'View / Print delivery challan'}
+                              aria-label={`View delivery challan for ${order.orderNumber}`}
                             >
                               <Printer className="w-4 h-4" />
                             </button>
@@ -353,6 +356,215 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
         </div>
       </div>
 
+      {/* ── VIEW CHALLAN MODAL ──────────────────────────────────────────── */}
+      {viewChallan && printOrder && printProgress && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setViewChallan(false); }}
+        >
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl flex flex-col"
+            style={{ width: '820px', maxWidth: '100%', maxHeight: '92vh' }}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  {printDispatch ? 'Sub-Delivery Challan' : 'Delivery Challan'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {printDispatch?.dispatchNumber || printOrder.orderNumber} &nbsp;·&nbsp; {printDispatch?.dispatchDate || printOrder.orderDate}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintFromModal}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Print Challan
+                </button>
+                <button
+                  onClick={() => setViewChallan(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  aria-label="Close preview"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Challan Preview Body */}
+            <div className="overflow-y-auto flex-1 bg-slate-100 p-6">
+              <div
+                ref={challanPrintRef}
+                style={{
+                  fontFamily: "'Arial', 'Helvetica Neue', sans-serif",
+                  width: '210mm',
+                  minHeight: '297mm',
+                  margin: '0 auto',
+                  padding: '14mm 16mm',
+                  boxSizing: 'border-box',
+                  color: '#0f172a',
+                  background: '#fff',
+                  boxShadow: '0 4px 32px rgba(0,0,0,0.13)',
+                  borderRadius: '6px'
+                }}
+              >
+                {/* Challan Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #2563eb', paddingBottom: '14px', marginBottom: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#1e3a8a', letterSpacing: '-0.5px' }}>ANGEL PET</div>
+                    <div style={{ fontSize: '10px', letterSpacing: '2.5px', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>PACKAGING SOLUTIONS PVT LTD</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{
+                      display: 'inline-block',
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '6px',
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      color: '#1e3a8a',
+                      letterSpacing: '0.5px'
+                    }}>
+                      {printDispatch ? 'SUB-DELIVERY CHALLAN' : 'DELIVERY CHALLAN'}
+                    </div>
+                    <div style={{ fontSize: '11px', marginTop: '8px', fontWeight: 700, color: '#334155' }}>
+                      #{printDispatch?.dispatchNumber || printOrder.orderNumber}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                      Date: {printDispatch?.dispatchDate || printOrder.orderDate}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '18px' }}>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '8px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }}>Bill To</div>
+                    <div style={{ fontWeight: 800, marginTop: '5px', fontSize: '13px', color: '#0f172a' }}>{printOrder.companyName || printOrder.customerName}</div>
+                    <div style={{ fontSize: '10px', marginTop: '3px', color: '#475569' }}>Attn: {printOrder.customerName}</div>
+                  </div>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '8px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '1px' }}>Order Reference</div>
+                    <div style={{ fontWeight: 800, marginTop: '5px', fontSize: '13px', color: '#0f172a' }}>{printOrder.orderNumber}</div>
+                    <div style={{ fontSize: '10px', marginTop: '3px', color: '#475569' }}>
+                      {printDispatch ? 'Sub-delivery quantities' : 'Initial delivery quantities'}
+                    </div>
+                    {printDispatch && (
+                      <div style={{ fontSize: '10px', marginTop: '4px', color: '#0f172a', fontWeight: 600 }}>
+                        🚛 Vehicle: {printDispatch.vehicleNumber || '—'} &nbsp;|&nbsp; Driver: {printDispatch.driverName || '—'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ background: '#1e3a8a', color: '#fff' }}>
+                      {['Product', 'Ordered (pcs)', 'Delivered (pcs)', 'Current Delivery', 'Remaining (pcs)'].map((heading) => (
+                        <th key={heading} style={{
+                          padding: '10px 8px',
+                          textAlign: heading === 'Product' ? 'left' : 'center',
+                          fontWeight: 700,
+                          fontSize: '10px',
+                          letterSpacing: '0.3px'
+                        }}>{heading}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {printOrder.items.map((orderItem, index) => {
+                      const progress = printProgress.items.find((item) => item.productId === orderItem.productId);
+                      const dispatchItem = printDispatch?.items.find((item) => item.productId === orderItem.productId);
+                      const currentPieces = dispatchItem?.quantity ?? (printDispatch ? 0 : orderItem.quantity);
+                      const displayUnit = dispatchItem?.deliveryUnit || (orderItem.soldByPacket && orderItem.packetCount !== undefined && orderItem.unitsPerPacket ? 'packets' : 'pieces');
+                      const displayQuantity = dispatchItem?.packetQuantity ?? (displayUnit === 'packets' ? orderItem.packetCount : currentPieces);
+                      const unitText = displayUnit === 'packets' && (dispatchItem?.unitsPerPacket || orderItem.unitsPerPacket)
+                        ? `${displayQuantity === 1 ? 'packet' : 'packets'} × ${dispatchItem?.unitsPerPacket || orderItem.unitsPerPacket} pcs + ${dispatchItem?.loosePieces || orderItem.loosePieces || 0} loose`
+                        : 'pieces';
+                      if (printDispatch && !dispatchItem) return null;
+                      const isFullyDelivered = progress && progress.remainingQuantity === 0;
+                      return (
+                        <tr key={orderItem.productId} style={{ background: index % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                          <td style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0', fontWeight: 700 }}>
+                            {orderItem.productName}
+                            <div style={{ fontSize: '9px', fontWeight: 400, color: '#94a3b8', marginTop: '2px' }}>{unitText}</div>
+                          </td>
+                          <td style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', color: '#475569' }}>
+                            {formatNumberDisplay(orderItem.quantity)}
+                          </td>
+                          <td style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', color: '#475569' }}>
+                            {formatNumberDisplay(progress?.deliveredQuantity || 0)}
+                          </td>
+                          <td style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 700, color: '#0f172a' }}>
+                            {formatNumberDisplay(displayQuantity)} {displayUnit}
+                            {displayUnit === 'packets' && <span style={{ fontWeight: 400, color: '#64748b' }}> + {formatNumberDisplay(dispatchItem?.loosePieces ?? orderItem.loosePieces ?? 0)} loose</span>}
+                            {displayUnit === 'packets' && <div style={{ fontSize: '9px', fontWeight: 400, color: '#94a3b8' }}>({formatNumberDisplay(currentPieces)} pcs)</div>}
+                          </td>
+                          <td style={{ padding: '10px 8px', borderBottom: '1px solid #e2e8f0', textAlign: 'center' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: '20px',
+                              background: isFullyDelivered ? '#dcfce7' : '#fef9c3',
+                              color: isFullyDelivered ? '#15803d' : '#854d0e',
+                              fontWeight: 700,
+                              fontSize: '10px'
+                            }}>
+                              {formatNumberDisplay(progress?.remainingQuantity || 0)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Summary row */}
+                <div style={{
+                  marginTop: '16px',
+                  padding: '10px 14px',
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#1e40af'
+                }}>
+                  <span>Total Ordered: {formatNumberDisplay(printProgress.totalOrderedQuantity)} pcs</span>
+                  <span>Total Delivered: {formatNumberDisplay(printProgress.totalDeliveredQuantity)} pcs</span>
+                  <span>Remaining: {formatNumberDisplay(printProgress.totalRemainingQuantity)} pcs</span>
+                </div>
+
+                <div style={{ marginTop: '14px', fontSize: '9px', color: '#94a3b8', lineHeight: 1.5 }}>
+                  Delivery quantities are recorded in pieces for inventory and fulfillment tracking. Packet quantities are shown only when configured on the product/order.
+                </div>
+
+                {/* Signature section */}
+                <div style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', borderTop: '1px dashed #cbd5e1', paddingTop: '16px' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ width: '160px', borderBottom: '1px solid #cbd5e1', marginBottom: '6px' }}></div>
+                    <span style={{ color: '#64748b' }}>Authorized Signatory</span>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ width: '160px', borderBottom: '1px solid #cbd5e1', marginBottom: '6px' }}></div>
+                    <span style={{ color: '#64748b' }}>Receiver's Signature & Stamp</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PRINT-ONLY CHALLAN (hidden on screen) ──────────────────────── */}
       {printOrder && printProgress && (
         <div id="angel-print-sales-challan" style={{ display: 'none' }}>
           <div style={{ fontFamily: 'Arial, sans-serif', width: '210mm', minHeight: '297mm', padding: '14mm 16mm', boxSizing: 'border-box', color: '#0f172a', background: '#fff' }}>

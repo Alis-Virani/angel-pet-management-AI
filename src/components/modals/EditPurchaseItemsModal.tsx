@@ -15,6 +15,7 @@ interface DraftItem {
   id: string;
   rawMaterialId: string;
   quantity: string;
+  unit: string;
   unitCost: string;
 }
 
@@ -22,6 +23,7 @@ const createDraftItem = (item?: PurchaseItem): DraftItem => ({
   id: item?.rawMaterialId || `line-${Date.now()}-${Math.random()}`,
   rawMaterialId: item?.rawMaterialId || '',
   quantity: item ? String(item.quantity) : '',
+  unit: item?.unit || '',
   unitCost: item ? String(item.unitCost) : ''
 });
 
@@ -108,7 +110,7 @@ export const EditPurchaseItemsModal: React.FC<EditPurchaseItemsModalProps> = ({
         rawMaterialName: material?.name || 'Unknown material',
         hsnSac: material?.code || '',
         category: material?.category || 'granules',
-        unit: material?.unit || 'kg',
+        unit: item.unit || material?.purchaseUnit || material?.unit || 'kg',
         unitCost,
         quantity,
         subtotal: quantity * unitCost,
@@ -147,7 +149,7 @@ export const EditPurchaseItemsModal: React.FC<EditPurchaseItemsModalProps> = ({
         rawMaterialName: material?.name || 'Unknown material',
         hsnSac: material?.code || '',
         category: material?.category || 'granules',
-        unit: material?.unit || 'kg',
+        unit: item.unit || material?.purchaseUnit || material?.unit || 'kg',
         unitCost,
         quantity,
         subtotal: quantity * unitCost,
@@ -192,14 +194,18 @@ export const EditPurchaseItemsModal: React.FC<EditPurchaseItemsModalProps> = ({
             const isOnlyBlankRow = items.length === 1 && !item.rawMaterialId && !item.quantity && !item.unitCost;
 
             return (
-              <div key={item.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_110px_140px_140px_auto] gap-2 items-end p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div key={item.id} className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_110px_110px_140px_140px_auto] gap-2 items-end p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Product {index + 1}</label>
                   <select
                     value={item.rawMaterialId}
                     onChange={(e) => {
                       const next = materials.find((candidate) => candidate.id === e.target.value);
-                      updateItem(item.id, { rawMaterialId: e.target.value, unitCost: next ? String(next.unitCost) : '' });
+                      updateItem(item.id, {
+                        rawMaterialId: e.target.value,
+                        unit: next?.purchaseUnit || next?.unit || '',
+                        unitCost: next ? String(next.unitCost) : ''
+                      });
                     }}
                     className="w-full px-3 py-2 bg-white text-xs rounded-xl border border-slate-200"
                   >
@@ -227,6 +233,22 @@ export const EditPurchaseItemsModal: React.FC<EditPurchaseItemsModalProps> = ({
                     onChange={(e) => updateItem(item.id, { unitCost: e.target.value.replace(/[^\d.]/g, '') })}
                     className="w-full px-3 py-2 bg-white text-xs rounded-xl border border-slate-200"
                   />
+                </div>
+                <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Unit</label>
+                <select
+                  value={item.unit || material?.purchaseUnit || material?.unit || ''}
+                  onChange={(e) => updateItem(item.id, { unit: e.target.value })}
+                  disabled={!material}
+                  className="w-full px-3 py-2 bg-white text-xs rounded-xl border border-slate-200 disabled:opacity-60"
+                >
+                  {material && Array.from(new Set([
+                    material.purchaseUnit,
+                    material.baseUnit,
+                    material.consumptionUnit,
+                    material.piecesPerBaseUnit ? 'pcs' : ''
+                  ].filter(Boolean))).map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                </select>
                 </div>
                 <div className="text-xs font-semibold text-slate-700 pb-2">
                   Amount: ₹{lineSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}

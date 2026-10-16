@@ -113,6 +113,11 @@ export function toBaseQuantity(
     return quantity * (material.conversionFactor || 1);
   }
 
+  // Pieces can be purchased for materials whose stock is tracked by weight.
+  if (from === 'pcs' && baseUnit !== 'pcs' && material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0) {
+    return quantity / material.piecesPerBaseUnit;
+  }
+
   // If converting from consumption unit (should be same as base, but handle gracefully)
   if (from === consumptionUnit) {
     return quantity;

@@ -868,7 +868,7 @@ export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' |
   setLocalItem(STORAGE_KEYS.DISPATCHES, [newDispatch, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'dispatches', newDispatch.id), newDispatch), 2500).catch((e) =>
+    withTimeout(setDoc(doc(getDb(), 'dispatches', newDispatch.id), sanitizeForFirestore(newDispatch)), 2500).catch((e) =>
       console.error('Error adding dispatch to Firebase:', e)
     );
   }
@@ -903,7 +903,7 @@ export async function updateDispatchStatus(id: string, newStatus: Dispatch['stat
   setLocalItem(STORAGE_KEYS.DISPATCHES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'dispatches', id), updatedDispatch, { merge: true }), 2500).catch((e) =>
+    withTimeout(setDoc(doc(getDb(), 'dispatches', id), sanitizeForFirestore(updatedDispatch), { merge: true }), 2500).catch((e) =>
       console.error('Error updating dispatch in Firebase:', e)
     );
   }
@@ -951,7 +951,7 @@ async function processDispatchStockDeduction(dispatch: Dispatch): Promise<void> 
     setLocalItem(STORAGE_KEYS.DISPATCHES, newList);
 
     if (shouldSyncToFirebase()) {
-      withTimeout(setDoc(doc(getDb(), 'dispatches', dispatch.id), { stockDeducted: true }, { merge: true }), 2500).catch((e) =>
+      withTimeout(setDoc(doc(getDb(), 'dispatches', dispatch.id), sanitizeForFirestore({ stockDeducted: true }), { merge: true }), 2500).catch((e) =>
         console.error('Error updating stockDeducted flag in Firebase:', e)
       );
     }
@@ -1577,15 +1577,9 @@ async function processPurchaseStockAddition(purchase: PurchaseOrder): Promise<Pu
                    materials.find((m) => (m.name || '').trim().toLowerCase() === (item.rawMaterialName || '').trim().toLowerCase());
 
     if (material) {
-      // Convert purchase quantity to base unit if conversion factor is available
-      let quantityToAdd = item.quantity;
-      if (material.conversionFactor && material.conversionFactor > 0) {
-        // If purchase unit is different from base unit, convert
-        if (item.unit.toLowerCase() === material.purchaseUnit.toLowerCase() &&
-            item.unit.toLowerCase() !== material.baseUnit.toLowerCase()) {
-          quantityToAdd = item.quantity * material.conversionFactor;
-        }
-      }
+      // Inventory is stored in base units, while purchase lines may use bags,
+      // packets, cartons, or pieces.
+      const quantityToAdd = toBaseQuantity(item.quantity, item.unit, material);
       
       const previousAddition = additionsByMaterial.get(material.id) || 0;
       const totalAddition = previousAddition + quantityToAdd;

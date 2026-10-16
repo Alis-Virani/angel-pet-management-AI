@@ -15,13 +15,15 @@ interface DraftPurchaseItem {
   id: string;
   rawMaterialId: string;
   quantity: string;
+  unit: string;
   unitCost: string;
 }
 
-const createDraftItem = (rawMaterialId = '', quantity = '', unitCost = ''): DraftPurchaseItem => ({
+const createDraftItem = (rawMaterialId = '', quantity = '', unit = '', unitCost = ''): DraftPurchaseItem => ({
   id: `line-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
   rawMaterialId,
   quantity,
+  unit,
   unitCost
 });
 
@@ -256,7 +258,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
   const handleMaterialChange = (id: string, materialId: string) => {
     const material = materials.find((candidate) => candidate.id === materialId);
-    updateItem(id, { rawMaterialId: materialId, unitCost: material ? String(material.unitCost) : '' });
+    updateItem(id, {
+      rawMaterialId: materialId,
+      unit: material?.purchaseUnit || material?.unit || '',
+      unitCost: material ? String(material.unitCost) : ''
+    });
     if (material?.supplier && !supplierName) setSupplierName(material.supplier);
   };
 
@@ -271,7 +277,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         rawMaterialName: material?.name || '',
         hsnSac: material?.code || '',
         category: material?.category || 'granules',
-        unit: material?.purchaseUnit || material?.unit || newMaterialUnit,
+        unit: item.unit || material?.purchaseUnit || material?.unit || newMaterialUnit,
         unitCost,
         quantity,
         subtotal: quantity * unitCost,
@@ -310,7 +316,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         rawMaterialName: material?.name || '',
         hsnSac: material?.code || '',
         category: material?.category || 'granules',
-        unit: material?.unit || newMaterialUnit,
+        unit: item.unit || material?.purchaseUnit || material?.unit || newMaterialUnit,
         unitCost,
         quantity,
         subtotal: quantity * unitCost,
@@ -348,7 +354,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           rawMaterialId: createdMaterial.id,
           rawMaterialName: createdMaterial.name,
           category: createdMaterial.category,
-          unit: createdMaterial.unit
+          unit: createdMaterial.purchaseUnit
         };
       }
 
@@ -428,7 +434,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
               const isOnlyBlankRow = items.length === 1 && !item.rawMaterialId && !item.quantity && !item.unitCost;
 
               return (
-                <div key={item.id} className="grid grid-cols-1 md:grid-cols-[minmax(220px,2fr)_minmax(120px,0.9fr)_minmax(150px,1fr)_minmax(155px,1fr)_auto] gap-x-3 gap-y-3 items-end p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div key={item.id} className="grid grid-cols-1 md:grid-cols-[minmax(220px,2fr)_minmax(120px,0.9fr)_minmax(110px,0.8fr)_minmax(150px,1fr)_minmax(155px,1fr)_auto] gap-x-3 gap-y-3 items-end p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
                   <div className="min-w-0">
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">Product / Material {index + 1}</label>
                     <SearchableMaterialSelect
@@ -449,13 +455,44 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                       className="w-full px-3 py-2.5 bg-slate-50 text-xs font-medium text-slate-800 rounded-xl border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                     />
                     <div className="text-[10px] text-slate-400 mt-1.5">
-                      Unit: {material?.purchaseUnit || material?.unit || newMaterialUnit}
-                      {material && material.conversionFactor > 1 && material.purchaseUnit !== material.baseUnit && (
+                      Unit: {item.unit || material?.purchaseUnit || material?.unit || newMaterialUnit}
+                      {material && item.unit && item.unit.toLowerCase() === material.purchaseUnit.toLowerCase() &&
+                        material.purchaseUnit.toLowerCase() !== material.baseUnit.toLowerCase() && (
                         <span className="ml-1 text-blue-600">
                           (1 {material.purchaseUnit} = {material.conversionFactor} {material.baseUnit})
                         </span>
                       )}
+                      {material && item.unit?.toLowerCase() === 'pcs' &&
+                        material.baseUnit.toLowerCase() !== 'pcs' &&
+                        material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0 && (
+                        <span className="ml-1 text-blue-600">
+                          (1 pcs = {(1 / material.piecesPerBaseUnit).toLocaleString('en-IN')} {material.baseUnit})
+                        </span>
+                      )}
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Purchase Unit</label>
+                    <select
+                      value={item.unit || material?.purchaseUnit || material?.unit || ''}
+                      onChange={(e) => updateItem(item.id, { unit: e.target.value })}
+                      disabled={!material}
+                      className="w-full px-3 py-2.5 bg-slate-50 text-xs font-medium text-slate-800 rounded-xl border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
+                    >
+                      {material && Array.from(new Set([
+                        material.purchaseUnit,
+                        material.baseUnit,
+                        material.consumptionUnit,
+                        material.piecesPerBaseUnit ? 'pcs' : ''
+                      ].filter(Boolean))).map((unit) => (
+                        <option key={unit} value={unit}>{unit}</option>
+                      ))}
+                    </select>
+                    {material && item.quantity && item.unit && (
+                      <div className="text-[10px] text-slate-500 mt-1.5">
+                        Stock addition: {toBaseQuantity(lineQty, item.unit, material).toLocaleString('en-IN', { maximumFractionDigits: 3 })} {material.baseUnit}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">Rate / Unit Cost</label>
@@ -550,6 +587,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                   <option value="pcs">pcs</option>
                   <option value="Bag">Bag</option>
                   <option value="Carton">Carton</option>
+                  <option value="Packet">Packet</option>
                 </select>
               </div>
               <div>
@@ -624,10 +662,8 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           <div>
             <span className="font-bold">Stock Maintenance Rule:</span>{' '}
             {status === 'received'
-              ? 'Saving this purchase as Received will automatically add ' +
-                validPurchaseItems.reduce((sum, item) => sum + item.quantity, 0).toLocaleString() +
-                ' ' +
-                ' across ' + validPurchaseItems.length + ' line item(s) to the Raw Materials inventory.'
+              ?               'Saving this purchase as Received will convert each line into its material base unit and add the result across ' +
+              validPurchaseItems.length + ' line item(s) to the Raw Materials inventory.'
               : 'This purchase will be saved as Pending. Stock will be added to Raw Materials inventory only when marked as Received later.'}
           </div>
         </div>
