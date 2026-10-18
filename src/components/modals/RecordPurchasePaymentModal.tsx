@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { PurchaseOrder } from '../../types';
 import { getPurchases, recordPurchasePayment } from '../../services/db';
@@ -24,6 +24,7 @@ export const RecordPurchasePaymentModal: React.FC<RecordPurchasePaymentModalProp
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const submissionInProgress = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -71,6 +72,7 @@ export const RecordPurchasePaymentModal: React.FC<RecordPurchasePaymentModalProp
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionInProgress.current) return;
     setError('');
 
     if (!selectedPurchaseId) {
@@ -93,6 +95,7 @@ export const RecordPurchasePaymentModal: React.FC<RecordPurchasePaymentModalProp
       return;
     }
 
+    submissionInProgress.current = true;
     setLoading(true);
     try {
       await recordPurchasePayment(selectedPurchaseId, paymentAmount, paymentDate, notes.trim());
@@ -102,6 +105,7 @@ export const RecordPurchasePaymentModal: React.FC<RecordPurchasePaymentModalProp
       console.error('Failed to record purchase payment:', err);
       setError(err instanceof Error ? err.message : 'Failed to record supplier payment. Please try again.');
     } finally {
+      submissionInProgress.current = false;
       setLoading(false);
     }
   };

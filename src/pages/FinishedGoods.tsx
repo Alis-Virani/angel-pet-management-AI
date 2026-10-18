@@ -96,8 +96,8 @@ export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedG
           title="Total Finished Goods"
           value={`${totalFinishedGoodsCount.toLocaleString()} units`}
           icon={Boxes}
-          change="Available"
-          changeType="positive"
+          change={products.length === 0 ? 'No Products' : undefined}
+          changeType="neutral"
           subtitle="Warehouse inventory"
           iconBgColor="bg-purple-50"
           iconTextColor="text-purple-600"
@@ -106,8 +106,8 @@ export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedG
           title="Low Stock Items"
           value={lowStockCount}
           icon={AlertTriangle}
-          change={lowStockCount > 0 ? 'Needs Production' : 'Healthy'}
-          changeType={lowStockCount > 0 ? 'negative' : 'positive'}
+          change={products.length === 0 ? 'No Products' : lowStockCount > 0 ? 'Needs Production' : 'Healthy'}
+          changeType={products.length === 0 ? 'neutral' : lowStockCount > 0 ? 'negative' : 'positive'}
           subtitle="Below safety threshold"
           iconBgColor="bg-rose-50"
           iconTextColor="text-rose-600"
@@ -116,8 +116,6 @@ export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedG
           title="Total Products"
           value={products.length}
           icon={Boxes}
-          change="Active SKUs"
-          changeType="neutral"
           subtitle="Bottles & Caps specifications"
           iconBgColor="bg-blue-50"
           iconTextColor="text-blue-600"
@@ -170,7 +168,13 @@ export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedG
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                {filteredProducts.map((p) => {
+                {filteredProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-10 text-center text-slate-500">
+                      {searchQuery ? 'No products match your search.' : 'No product records found.'}
+                    </td>
+                  </tr>
+                ) : filteredProducts.map((p) => {
                   const isLowStock = p.currentStock <= p.minimumStock;
                   const imgUrl = getProductImageUrl(p);
                   return (

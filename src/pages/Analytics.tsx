@@ -301,6 +301,7 @@ export const Analytics: React.FC = () => {
 
   // Chart 1: Top Customers Bar Chart (using real data)
   const topCustomerData = clientAnalytics
+    .filter((customer) => customer.totalOrders > 0)
     .slice(0, 5)
     .map((c) => ({
       name: c.company.length > 12 ? `${c.company.substring(0, 12)}...` : c.company,
@@ -318,6 +319,8 @@ export const Analytics: React.FC = () => {
 
   // Chart 3: Monthly Trend (using real data)
   const monthlyTrend = useMemo(() => {
+    if (filteredOrders.length === 0 && filteredExpenses.length === 0) return [];
+
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentYear = new Date().getFullYear();
     
@@ -378,8 +381,6 @@ export const Analytics: React.FC = () => {
           title="Revenue"
           value={`₹${(totalRevenue / 100000).toFixed(2)}L`}
           icon={IndianRupee}
-          change="+9.2%"
-          changeType="positive"
           subtitle="Gross sales booked"
           iconBgColor="bg-blue-50"
           iconTextColor="text-blue-600"
@@ -388,8 +389,6 @@ export const Analytics: React.FC = () => {
           title="Collections"
           value={`₹${(totalCollections / 100000).toFixed(2)}L`}
           icon={TrendingUp}
-          change="+4.8%"
-          changeType="positive"
           subtitle="Total cash collected"
           iconBgColor="bg-emerald-50"
           iconTextColor="text-emerald-600"
@@ -398,8 +397,6 @@ export const Analytics: React.FC = () => {
           title="Expenses"
           value={`₹${(totalExpenses / 100000).toFixed(2)}L`}
           icon={ShoppingBag}
-          change="-2.1%"
-          changeType="positive"
           subtitle="Raw material & overheads"
           iconBgColor="bg-rose-50"
           iconTextColor="text-rose-600"
@@ -408,8 +405,6 @@ export const Analytics: React.FC = () => {
           title="Average Order Value"
           value={`₹${avgOrderValue.toFixed(0).toLocaleString()}`}
           icon={Award}
-          change="AOV"
-          changeType="neutral"
           subtitle="Per sales order"
           iconBgColor="bg-purple-50"
           iconTextColor="text-purple-600"
@@ -428,25 +423,31 @@ export const Analytics: React.FC = () => {
             <BarChart3 className="w-5 h-5 text-blue-600" />
           </div>
 
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topCustomerData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 11, fill: '#64748b' }}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  formatter={(val: any) => [`₹${Number(val).toLocaleString()}`, 'Total Spent']}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                />
-                <Bar dataKey="Revenue" fill="#2563eb" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {topCustomerData.length > 0 ? (
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topCustomerData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip
+                    formatter={(val: any) => [`₹${Number(val).toLocaleString()}`, 'Total Spent']}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                  />
+                  <Bar dataKey="Revenue" fill="#2563eb" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-72 flex items-center justify-center text-sm text-slate-500">
+              No customer sales recorded for this period.
+            </div>
+          )}
         </div>
 
         {/* Revenue Mix Donut Chart */}
@@ -460,25 +461,29 @@ export const Analytics: React.FC = () => {
           </div>
 
           <div className="h-72 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={revenueMixData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {revenueMixData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(val: any) => `₹${Number(val).toLocaleString()}`} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {revenueMixData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={revenueMixData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={4}
+                    dataKey="value"
+                  >
+                    {revenueMixData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(val: any) => `₹${Number(val).toLocaleString()}`} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-slate-500">No product sales recorded for this period.</p>
+            )}
           </div>
         </div>
       </div>
@@ -490,24 +495,30 @@ export const Analytics: React.FC = () => {
           <p className="text-xs text-slate-500">Tracking monthly profitability & cost margins</p>
         </div>
 
-        <div className="h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                tick={{ fontSize: 11, fill: '#64748b' }}
-                tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-              />
-              <Tooltip formatter={(val: any) => `₹${Number(val).toLocaleString()}`} />
-              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              <Bar dataKey="Sales" fill="#2563eb" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="Expenses" fill="#f43f5e" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {monthlyTrend.length > 0 ? (
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={monthlyTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                />
+                <Tooltip formatter={(val: any) => `₹${Number(val).toLocaleString()}`} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                <Bar dataKey="Sales" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="Expenses" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="h-72 flex items-center justify-center text-sm text-slate-500">
+            No sales or expense activity recorded for this period.
+          </div>
+        )}
       </div>
 
       {/* Client-wise Analysis Section */}
@@ -536,7 +547,11 @@ export const Analytics: React.FC = () => {
 
         {/* Customer Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCustomers.slice(0, 9).map((customer) => (
+          {filteredCustomers.length === 0 ? (
+            <p className="col-span-full py-8 text-center text-sm text-slate-500">
+              {customerSearch ? 'No matching customers found.' : 'No customer records available for this period.'}
+            </p>
+          ) : filteredCustomers.slice(0, 9).map((customer) => (
             <div
               key={customer.id}
               className="p-4 border border-slate-200 rounded-2xl hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
@@ -599,7 +614,11 @@ export const Analytics: React.FC = () => {
 
         {/* Product Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredProducts.slice(0, 9).map((data) => (
+          {filteredProducts.length === 0 ? (
+            <p className="col-span-full py-8 text-center text-sm text-slate-500">
+              {productSearch ? 'No matching products found.' : 'No product sales recorded for this period.'}
+            </p>
+          ) : filteredProducts.slice(0, 9).map((data) => (
             <div
               key={data.product.id}
               className="p-4 border border-slate-200 rounded-2xl hover:border-purple-300 hover:shadow-md transition-all cursor-pointer"

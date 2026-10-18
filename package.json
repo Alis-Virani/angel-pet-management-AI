@@ -7,12 +7,18 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:emulator": "tsc -p tsconfig.test.json && firebase emulators:exec --project demo-angel-pet-audit --only auth,firestore,storage \"vitest run --config vitest.config.ts\"",
     "authority:grant-owner": "node scripts/grant-owner-admin.cjs"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "firebase-admin": "^14.5.0",
+    "firebase-tools": "^15.34.0",
+    "jsdom": "^29.1.1",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",

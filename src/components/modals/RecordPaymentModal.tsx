@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Order, PaymentMethod } from '../../types';
 import { getOrders, addPayment } from '../../services/db';
@@ -25,6 +25,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submissionInProgress = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -78,6 +79,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionInProgress.current) return;
     if (!selectedOrder) {
       setError('Please select an eligible order.');
       return;
@@ -91,6 +93,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       return;
     }
 
+    submissionInProgress.current = true;
     setLoading(true);
     setError('');
     try {
@@ -111,6 +114,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       console.error(err);
       setError(err instanceof Error ? err.message : 'Failed to record payment.');
     } finally {
+      submissionInProgress.current = false;
       setLoading(false);
     }
   };

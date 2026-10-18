@@ -10,7 +10,10 @@ export interface CloudinaryUploadResult {
 }
 
 export async function uploadToCloudinary(file: File | Blob): Promise<CloudinaryUploadResult> {
-  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'demo';
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+  if (!cloudName) {
+    throw new Error('Cloudinary is not configured. Set VITE_CLOUDINARY_CLOUD_NAME before uploading product images.');
+  }
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'unsigned';
   const folder = import.meta.env.VITE_CLOUDINARY_FOLDER || 'angel-pet';
 

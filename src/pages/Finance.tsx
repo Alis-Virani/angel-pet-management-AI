@@ -205,22 +205,7 @@ export const Finance: React.FC<FinanceProps> = ({
       setDispatches(dispatchList);
       setCustomers(customerList);
       setSettings(settingsData);
-      const activeReminderOrders = ordList.filter((order) => order.orderStatus !== 'cancelled' && order.orderType !== 'AS' && order.totalAmount > order.paidAmount);
-      const existingReminderOrderIds = new Set(reminderList.map((reminder) => reminder.orderId));
-      const missingReminders = activeReminderOrders.filter((order) => !existingReminderOrderIds.has(order.id));
-      const createdReminders = await Promise.all(missingReminders.map((order) => {
-        const customer = customerList.find((item) => item.id === order.customerId);
-        return savePaymentReminder({
-          orderId: order.id,
-          customerId: order.customerId,
-          customerName: order.companyName || order.customerName,
-          phone: customer?.phone || 'Not available',
-          dueDate: order.dueDate,
-          followUpDate: '',
-          notes: ''
-        });
-      }));
-      setReminders([...reminderList, ...createdReminders]);
+      setReminders(reminderList);
       setSelectedPartyId((current) => current || customerList[0]?.id || purchaseList[0]?.supplierName || '');
     } catch (e) {
       console.error('Error loading finance data:', e);
@@ -244,30 +229,50 @@ export const Finance: React.FC<FinanceProps> = ({
   };
 
   const activeOrders = orders.filter((order) => order.orderStatus !== 'cancelled' && order.orderType !== 'AS');
-  const activeOrderIds = new Set(activeOrders.flatMap((order) => [order.id, order.orderNumber]));
   const totalSales = activeOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-  const totalCollections = payments.filter((payment) => activeOrderIds.has(payment.orderId)).reduce((sum, p) => sum + p.amount, 0);
-  const pendingCollections = Math.max(0, totalSales - totalCollections);
   const todayKey = toDateKey(new Date());
   const paymentTotalsByOrder = payments.reduce<Record<string, number>>((totals, payment) => {
-    totals[payment.orderId] = (totals[payment.orderId] || 0) + payment.amount;
+    for (const key of new Set([payment.orderId, payment.orderNumber])) {
+      totals[key] = (totals[key] || 0) + payment.amount;
+    }
     return totals;
   }, {});
+  const getCollectedAmount = (order: Order) => Math.max(
+    order.paidAmount || 0,
+    paymentTotalsByOrder[order.id] || 0,
+    paymentTotalsByOrder[order.orderNumber] || 0
+  );
+  const totalCollections = activeOrders.reduce((sum, order) => sum + getCollectedAmount(order), 0);
+  const pendingCollections = Math.max(0, totalSales - totalCollections);
 
-  const reminderRows = reminders
-    .map((reminder) => {
-      const order = orders.find((item) => item.id === reminder.orderId);
-      if (!order || order.orderStatus === 'cancelled' || order.orderType === 'AS') return null;
-      const paid = paymentTotalsByOrder[order.id] ?? order.paidAmount;
+  const reminderRows = activeOrders
+    .map((order) => {
+      const paid = getCollectedAmount(order);
       const outstanding = Math.max(0, order.totalAmount - paid);
       if (outstanding <= 0) return null;
+      const savedReminder = reminders.find((item) => item.orderId === order.id);
+      const customer = customers.find((item) => item.id === order.customerId);
+      const reminder: PaymentReminder = savedReminder || {
+        id: `draft-${order.id}`,
+        orderId: order.id,
+        customerId: order.customerId,
+        customerName: order.companyName || order.customerName,
+        phone: customer?.phone || 'Not available',
+        dueDate: order.dueDate,
+        followUpDate: '',
+        notes: '',
+        createdAt: '',
+        updatedAt: ''
+      };
       const daysOverdue = reminder.dueDate && reminder.dueDate < todayKey
         ? Math.floor((Date.parse(`${todayKey}T00:00:00`) - Date.parse(`${reminder.dueDate}T00:00:00`)) / 86400000)
         : 0;
-      const status: ReminderStatus = !reminder.dueDate
+      const status: ReminderStatus = !savedReminder
+        ? 'not_set'
+        : !reminder.dueDate
         ? 'not_set'
         : reminder.dueDate < todayKey ? 'overdue' : reminder.dueDate === todayKey ? 'due_today' : 'upcoming';
-      return { reminder, order, outstanding, daysOverdue, status };
+      return { reminder, order, outstanding, daysOverdue, status, needsCreation: !savedReminder };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
     .filter((row) => reminderStatusFilter === 'all' || row.status === reminderStatusFilter)
@@ -282,9 +287,7 @@ export const Finance: React.FC<FinanceProps> = ({
       order.customerId === customer.id && order.orderStatus !== 'cancelled' && order.orderType !== 'AS'
     );
     const total = customerOrders.reduce((sum, order) => sum + order.totalAmount, 0);
-    const paid = customerOrders.reduce((sum, order) =>
-      sum + (paymentTotalsByOrder[order.id] ?? order.paidAmount), 0
-    );
+    const paid = customerOrders.reduce((sum, order) => sum + getCollectedAmount(order), 0);
     const outstanding = Math.max(0, total - paid);
     if (outstanding <= 0) return [];
     const status: ReminderStatus = reminder.status === 'completed'
@@ -384,7 +387,9 @@ export const Finance: React.FC<FinanceProps> = ({
         followUpDate: reminderFollowUpDate || undefined,
         notes: reminderNotes.trim() || undefined
       });
-      setReminders((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setReminders((current) => current.some((item) => item.id === updated.id)
+        ? current.map((item) => item.id === updated.id ? updated : item)
+        : [updated, ...current]);
       setEditingReminder(null);
     } catch (error) {
       console.error('Failed to save payment reminder:', error);
@@ -583,7 +588,7 @@ export const Finance: React.FC<FinanceProps> = ({
     ...orders
       .filter((order) => order.orderStatus !== 'cancelled' && order.orderType !== 'AS')
       .map((order) => {
-        const paid = paymentTotalsByOrder[order.id] || paymentTotalsByOrder[order.orderNumber] || 0;
+        const paid = getCollectedAmount(order);
         return {
           type: 'SALE' as const,
           id: order.orderNumber,
@@ -1511,7 +1516,7 @@ export const Finance: React.FC<FinanceProps> = ({
                 <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                   {reminderRows.length === 0 ? (
                     <tr><td colSpan={8} className="py-12 text-center text-slate-400">No collection reminders match the selected filters.</td></tr>
-                  ) : reminderRows.map(({ reminder, order, outstanding, daysOverdue, status }) => (
+                  ) : reminderRows.map(({ reminder, order, outstanding, daysOverdue, status, needsCreation }) => (
                     <tr key={reminder.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-900">{reminder.customerName}</div>
@@ -1526,8 +1531,8 @@ export const Finance: React.FC<FinanceProps> = ({
                       <td className="py-3 px-4"><Badge status={order.paymentStatus} /></td>
                       <td className="py-3 px-4 text-slate-500">{reminder.followUpDate || '—'}</td>
                       <td className="py-3 px-4 text-right">
-                        {can('finance', 'edit') && <button onClick={() => openReminderEditor(reminder)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
-                          <CalendarDays className="w-3.5 h-3.5" /> Manage
+                        {can('finance', needsCreation ? 'create' : 'edit') && <button onClick={() => openReminderEditor(reminder)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
+                          <CalendarDays className="w-3.5 h-3.5" /> {needsCreation ? 'Set reminder' : 'Manage'}
                         </button>}
                       </td>
                     </tr>

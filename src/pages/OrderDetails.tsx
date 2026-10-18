@@ -210,11 +210,11 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
   const pendingBalance = isAS ? 0 : Math.max(0, order.totalAmount - order.paidAmount);
   const orderProgress = order ? getOrderDeliveryProgress(order, dispatches) : null;
 
-  const companyName = settings?.companyName || 'Angel Pet Packaging Solutions Pvt Ltd';
-  const companyAddress = settings?.address || 'Plot 108, GIDC Industrial Estate, Makarpura, Vadodara, Gujarat – 390010';
-  const companyPhone = settings?.phone || '+91 98250 99887';
-  const companyEmail = settings?.email || 'sales@angelpetpackaging.com';
-  const companyGstin = isGst ? (settings?.gstin || '24AAACA1234B1Z9') : '';
+  const companyName = settings?.companyName || '';
+  const companyAddress = settings?.address || '';
+  const companyPhone = settings?.phone || '';
+  const companyEmail = settings?.email || '';
+  const companyGstin = isGst ? settings?.gstin || '' : '';
 
   const customerGstin = isGst ? customer?.gstin : undefined;
 
@@ -260,21 +260,20 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                 <td style={{ ...S.headerCell, width: '55%' }}>
                   {isGst ? (
                     <>
-                      <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.3px', lineHeight: 1.2 }}>
+                      {companyName && <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.3px', lineHeight: 1.2 }}>
                         {companyName}
-                      </div>
-                      <div style={{ fontSize: '8.5px', fontWeight: 700, color: '#64748b', letterSpacing: '1px', textTransform: 'uppercase', marginTop: '1px' }}>
-                        PACKAGING SOLUTIONS
-                      </div>
-                      <div style={{ fontSize: '9px', color: '#475569', lineHeight: 1.5, marginTop: '4px' }}>
-                        <div>{companyAddress}</div>
-                        <div>Tel: {companyPhone} &nbsp;|&nbsp; Email: {companyEmail}</div>
+                      </div>}
+                      {(companyAddress || companyPhone || companyEmail) && (
+                        <div style={{ fontSize: '9px', color: '#475569', lineHeight: 1.5, marginTop: '4px' }}>
+                        {companyAddress && <div>{companyAddress}</div>}
+                        {(companyPhone || companyEmail) && <div>{companyPhone ? `Tel: ${companyPhone}` : ''}{companyPhone && companyEmail ? ' | ' : ''}{companyEmail ? `Email: ${companyEmail}` : ''}</div>}
                         {companyGstin && (
                           <div style={{ fontWeight: 700, color: '#0f172a', marginTop: '2px' }}>
                             GSTIN: {companyGstin}
                           </div>
                         )}
-                      </div>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div style={{ fontSize: '14px', fontWeight: 700, color: '#475569' }}>

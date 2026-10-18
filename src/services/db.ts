@@ -95,22 +95,31 @@ import type {
   , AuthorityModule
   , PermissionAction
 } from '../types';
-import {
-  initialCustomers,
-  initialProducts,
-  initialOrders,
-  initialDispatches,
-  initialPayments,
-  initialExpenses,
-  initialRawMaterials,
-  initialRawMaterialUsage,
-  initialFinishedGoodsLogs,
-  initialDocuments,
-  initialSettings,
-  initialPurchases
-} from '../data/seedData';
 import { getOrderDeliveryProgress, generateNextChallanNumber } from '../utils/dispatchUtils';
 import { toBaseQuantity } from '../utils/unitConversion';
+
+const initialCustomers: Customer[] = [];
+const initialProducts: Product[] = [];
+const initialOrders: Order[] = [];
+const initialDispatches: Dispatch[] = [];
+const initialPayments: Payment[] = [];
+const initialExpenses: Expense[] = [];
+const initialRawMaterials: RawMaterial[] = [];
+const initialRawMaterialUsage: RawMaterialUsage[] = [];
+const initialFinishedGoodsLogs: FinishedGoodsLog[] = [];
+const initialDocuments: DocumentItem[] = [];
+const initialPurchases: PurchaseOrder[] = [];
+const initialSettings: Settings = {
+  companyName: '',
+  gstin: '',
+  phone: '',
+  email: '',
+  address: '',
+  invoicePrefix: 'ORD-',
+  gstRate: 18,
+  defaultPriceCategory: 'A',
+  enableNotifications: true
+};
 
 // LocalStorage Keys for fallback
 const STORAGE_KEYS = {
@@ -128,8 +137,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'angel_pet_settings',
   PURCHASES: 'angel_pet_purchases',
   PURCHASED_MATERIALS: 'angel_pet_purchased_materials',
-  PAYMENT_REMINDERS: 'angel_pet_payment_reminders',
-  INITIALIZED: 'angel_pet_seed_initialized_v3'
+  PAYMENT_REMINDERS: 'angel_pet_payment_reminders'
 };
 
 // Helper to interact with LocalStorage
@@ -254,39 +262,6 @@ function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
     ...merged,
     ...localList.filter((localItem) => !remoteIds.has(localItem.id))
   ];
-}
-
-// Ensure database is seeded with initial data on first load
-export async function seedDatabase(force = false): Promise<void> {
-  if (isLiveFirebaseConfigured) {
-    if (force) throw new Error('Resetting live company data with demo seed records is disabled.');
-    return;
-  }
-  const isAlreadyInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
-
-  // Initialize the local fallback before any asynchronous Firebase work so a
-  // user write cannot be overwritten when remote seeding completes.
-  if (!isAlreadyInitialized || force) {
-    setLocalItem(STORAGE_KEYS.CUSTOMERS, initialCustomers);
-    setLocalItem(STORAGE_KEYS.PRODUCTS, initialProducts);
-    setLocalItem(STORAGE_KEYS.ORDERS, initialOrders);
-    setLocalItem(STORAGE_KEYS.DISPATCHES, initialDispatches);
-    setLocalItem(STORAGE_KEYS.PAYMENTS, initialPayments);
-    setLocalItem(STORAGE_KEYS.EXPENSES, initialExpenses);
-    setLocalItem(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
-    setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, initialRawMaterialUsage);
-    setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, initialFinishedGoodsLogs);
-    setLocalItem(STORAGE_KEYS.DOCUMENTS, initialDocuments);
-    setLocalItem(STORAGE_KEYS.SETTINGS, initialSettings);
-    setLocalItem(STORAGE_KEYS.PURCHASES, initialPurchases);
-    localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
-  }
-
-}
-
-// Run seed check immediately
-if (typeof localStorage !== 'undefined') {
-  seedDatabase().catch((err) => console.error('Seed check error:', err));
 }
 
 // ================= CUSTOMERS =================
@@ -825,6 +800,13 @@ export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' |
     throw new Error('Please specify at least one product with a delivery quantity greater than 0.');
   }
 
+  if (
+    (data.status === 'dispatched' || data.status === 'delivered') &&
+    targetOrder.orderType !== 'AS'
+  ) {
+    assertDispatchStockAvailable(data.items, await getProducts());
+  }
+
   // Generate unique sub-challan number (e.g. CH-001, CH-002)
   const dispatchNumber = generateNextChallanNumber(existingDispatches);
   const newDispatch: Dispatch = {
@@ -847,6 +829,20 @@ export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' |
   }
 
   return newDispatch;
+}
+
+function assertDispatchStockAvailable(items: Dispatch['items'], products: Product[]): void {
+  const requiredByProduct = new Map<string, number>();
+  for (const item of items) {
+    requiredByProduct.set(item.productId, (requiredByProduct.get(item.productId) || 0) + item.quantity);
+  }
+
+  for (const [productId, quantity] of requiredByProduct) {
+    const product = products.find((candidate) => candidate.id === productId);
+    if (product && product.currentStock < quantity) {
+      throw new Error(`Insufficient stock for ${product.name}. Available: ${product.currentStock}, required: ${quantity}.`);
+    }
+  }
 }
 
 export async function updateDispatchStatus(id: string, newStatus: Dispatch['status']): Promise<Dispatch> {
@@ -900,12 +896,7 @@ async function processDispatchStockDeduction(dispatch: Dispatch): Promise<void> 
     for (const item of dispatch.items) {
       deductedByProduct.set(item.productId, (deductedByProduct.get(item.productId) || 0) + item.quantity);
     }
-    for (const [productId, quantity] of deductedByProduct) {
-      const product = products.find((candidate) => candidate.id === productId);
-      if (product && product.currentStock < quantity) {
-        throw new Error(`Insufficient stock for ${product.name}. Available: ${product.currentStock}, required: ${quantity}.`);
-      }
-    }
+    assertDispatchStockAvailable(dispatch.items, products);
     for (const [productId, quantity] of deductedByProduct) {
       const product = products.find((p) => p.id === productId);
       if (product) {
@@ -1517,7 +1508,7 @@ async function processPurchaseStockAddition(purchase: PurchaseOrder): Promise<Pu
         conversionFactor: 1,
         piecesPerBaseUnit: undefined,
         unitCost: item.unitCost || 0,
-        supplier: purchase.supplierName || 'Direct Supplier'
+        supplier: purchase.supplierName || ''
       });
       materials.push(newMat);
       additionsByMaterial.set(newMat.id, item.quantity);

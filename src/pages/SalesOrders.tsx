@@ -430,7 +430,6 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid #2563eb', paddingBottom: '14px', marginBottom: '16px' }}>
                   <div>
                     <div style={{ fontSize: '24px', fontWeight: 800, color: '#1e3a8a', letterSpacing: '-0.5px' }}>ANGEL PET</div>
-                    <div style={{ fontSize: '10px', letterSpacing: '2.5px', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>PACKAGING SOLUTIONS PVT LTD</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{
@@ -629,7 +628,6 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #2563eb', paddingBottom: '12px', marginBottom: '14px' }}>
               <div>
                 <div style={{ fontSize: '22px', fontWeight: 800, color: '#1e3a8a' }}>ANGEL PET</div>
-                <div style={{ fontSize: '10px', letterSpacing: '2px', color: '#64748b' }}>PACKAGING SOLUTIONS PVT LTD</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '17px', fontWeight: 800, color: '#1e3a8a' }}>

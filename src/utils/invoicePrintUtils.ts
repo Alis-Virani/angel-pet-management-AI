@@ -260,11 +260,11 @@ export function generateInvoiceHtml(
   const isGst = isPakkaBill(order);
   const pendingBalance = Math.max(0, order.totalAmount - order.paidAmount);
 
-  const companyName = settings?.companyName || 'Angel Pet Packaging Solutions Pvt Ltd';
-  const companyAddress = settings?.address || 'Plot 108, GIDC Industrial Estate, Makarpura, Vadodara, Gujarat – 390010';
-  const companyPhone = settings?.phone || '+91 98250 99887';
-  const companyEmail = settings?.email || 'sales@angelpetpackaging.com';
-  const companyGstin = isGst ? (settings?.gstin || '24AAACA1234B1Z9') : '';
+  const companyName = settings?.companyName || '';
+  const companyAddress = settings?.address || '';
+  const companyPhone = settings?.phone || '';
+  const companyEmail = settings?.email || '';
+  const companyGstin = isGst ? settings?.gstin || '' : '';
 
   const customerGstin = isGst ? customer?.gstin : undefined;
 
@@ -388,17 +388,12 @@ export function generateInvoiceHtml(
           <!-- LEFT: Company Branding -->
           <td style="vertical-align: top; width: 55%;">
             ${isGst ? `
-              <div style="font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; line-height: 1.2;">
-                ${companyName}
-              </div>
-              <div style="font-size: 8.5px; font-weight: 700; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-top: 1px;">
-                Packaging Solutions
-              </div>
-              <div style="font-size: 9px; color: #475569; line-height: 1.5; margin-top: 4px;">
-                <div>${companyAddress}</div>
-                <div>Tel: ${companyPhone} &nbsp;|&nbsp; Email: ${companyEmail}</div>
+              ${companyName ? `<div style="font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; line-height: 1.2;">${companyName}</div>` : ''}
+              ${(companyAddress || companyPhone || companyEmail) ? `<div style="font-size: 9px; color: #475569; line-height: 1.5; margin-top: 4px;">
+                ${companyAddress ? `<div>${companyAddress}</div>` : ''}
+                ${(companyPhone || companyEmail) ? `<div>${companyPhone ? `Tel: ${companyPhone}` : ''}${companyPhone && companyEmail ? ' &nbsp;|&nbsp; ' : ''}${companyEmail ? `Email: ${companyEmail}` : ''}</div>` : ''}
                 ${companyGstin ? `<div style="font-weight: 700; color: #0f172a; margin-top: 2px;">GSTIN: ${companyGstin}</div>` : ''}
-              </div>
+              </div>` : ''}
             ` : `
               <!-- Minimal header for non-GST bills -->
               <div style="font-size: 14px; font-weight: 700; color: #475569;">

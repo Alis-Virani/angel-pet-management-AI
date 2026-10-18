@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Product, ProductType, RawMaterial } from '../../types';
 import {
@@ -15,6 +15,7 @@ import {
   getStockInBothUnits,
   toBaseQuantity
 } from '../../utils/unitConversion';
+import { calculateNetProductionQuantity } from '../../utils/productionUtils';
 import { AlertCircle, Boxes } from 'lucide-react';
 
 interface AddFinishedGoodsModalProps {
@@ -65,6 +66,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submissionInProgress = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -125,7 +127,11 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   const totalMaterialQuantityKg = totalWeightKg;
   const wastage1Number = Number(wastage1) || 0;
   const wastage2Number = Number(wastage2) || 0;
-  const netMaterialQuantityKg = totalMaterialQuantityKg - wastage1Number - wastage2Number;
+  const netMaterialQuantityKg = calculateNetProductionQuantity(
+    totalMaterialQuantityKg,
+    wastage1Number,
+    wastage2Number
+  );
   const toMaterialBaseQuantity = (quantityKg: number) => {
     if (!selectedMaterial) return 0;
     const baseUnit = (selectedMaterial.baseUnit || selectedMaterial.unit).toLowerCase();
@@ -165,6 +171,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (submissionInProgress.current) return;
     const productionDate = parseProductionDate(date);
     if (!productionDate) {
       setError('Enter a valid production date in DD MM YYYY format.');
@@ -200,6 +207,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       return;
     }
 
+    submissionInProgress.current = true;
     setLoading(true);
     setError('');
     try {
@@ -234,6 +242,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       console.error(err);
       setError(err instanceof Error ? err.message : 'Failed to record production output.');
     } finally {
+      submissionInProgress.current = false;
       setLoading(false);
     }
   };

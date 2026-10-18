@@ -90,17 +90,71 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const lowStockItems = products.filter((p) => p.currentStock <= p.minimumStock);
   const outstandingPayments = Math.max(0, totalSales - totalCollected);
 
-  // Sales Trend Chart Data
-  const chartData = [
-    { month: 'Jan', Sales: 120000 },
-    { month: 'Feb', Sales: 185000 },
-    { month: 'Mar', Sales: 240000 },
-    { month: 'Apr', Sales: 210000 },
-    { month: 'May', Sales: 310000 },
-    { month: 'Jun', Sales: 290000 },
-    { month: 'Jul', Sales: 420000 },
-    { month: 'Aug', Sales: totalSales > 0 ? totalSales : 380000 }
-  ];
+  const chartData = (() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const chartUsesDays = period === 'Today' || period === 'This Week' || period === 'This Month';
+    let startDate = today;
+    let bucketDates: Date[] = [];
+
+    if (period === 'Today') {
+      bucketDates = [today];
+    } else if (period === 'This Week') {
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - today.getDay());
+      bucketDates = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(startDate);
+        date.setDate(startDate.getDate() + index);
+        return date;
+      });
+    } else if (period === 'This Month') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      bucketDates = Array.from({ length: today.getDate() }, (_, index) =>
+        new Date(now.getFullYear(), now.getMonth(), index + 1)
+      );
+    } else {
+      const firstMonth = period === 'This Quarter' ? Math.floor(now.getMonth() / 3) * 3 : 0;
+      startDate = new Date(now.getFullYear(), firstMonth, 1);
+      bucketDates = Array.from(
+        { length: now.getMonth() - firstMonth + 1 },
+        (_, index) => new Date(now.getFullYear(), firstMonth + index, 1)
+      );
+    }
+
+    const dateKey = (date: Date, daily: boolean) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return daily ? `${year}-${month}-${day}` : `${year}-${month}`;
+    };
+    const salesByBucket = new Map<string, number>();
+    let chartOrderCount = 0;
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    orders.forEach((order) => {
+      if (order.orderType === 'AS') return;
+      const datePart = order.orderDate.split('T')[0];
+      const [year, month, day] = datePart.split('-').map(Number);
+      const orderDate = day
+        ? new Date(year, month - 1, day)
+        : new Date(order.orderDate);
+      if (Number.isNaN(orderDate.getTime()) || orderDate < startDate || orderDate >= tomorrow) return;
+      const key = dateKey(orderDate, chartUsesDays);
+      salesByBucket.set(key, (salesByBucket.get(key) || 0) + order.totalAmount);
+      chartOrderCount += 1;
+    });
+
+    return {
+      hasSalesOrders: chartOrderCount > 0,
+      data: bucketDates.map((date) => ({
+        label: chartUsesDays
+          ? date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })
+          : date.toLocaleDateString('en-IN', { month: 'short' }),
+        Sales: salesByBucket.get(dateKey(date, chartUsesDays)) || 0
+      }))
+    };
+  })();
 
   // Top Customers by total spent
   const sortedCustomers = [...customers].sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 5);
@@ -154,8 +208,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           title={t('Total Sales')}
           value={`₹${(totalSales / 100000).toFixed(1)}L`}
           icon={IndianRupee}
-          change="+12.4%"
-          changeType="positive"
           subtitle="Total revenue booked"
           iconBgColor="bg-blue-50"
           iconTextColor="text-blue-600"
@@ -165,8 +217,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           title={t('Total Orders')}
           value={totalOrdersCount}
           icon={ShoppingCart}
-          change="+6.1%"
-          changeType="positive"
           subtitle="Orders placed to date"
           iconBgColor="bg-sky-50"
           iconTextColor="text-sky-600"
@@ -198,8 +248,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           title="Low Stock Items"
           value={lowStockItems.length}
           icon={AlertTriangle}
-          change={lowStockItems.length > 0 ? 'Reorder Needed' : 'Healthy'}
-          changeType={lowStockItems.length > 0 ? 'negative' : 'positive'}
+          change={products.length === 0 ? 'No Products' : lowStockItems.length > 0 ? 'Reorder Needed' : 'Healthy'}
+          changeType={products.length === 0 ? 'neutral' : lowStockItems.length > 0 ? 'negative' : 'positive'}
           subtitle="Below safety threshold"
           iconBgColor="bg-rose-50"
           iconTextColor="text-rose-600"
@@ -246,31 +296,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 11, fill: '#64748b' }}
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  formatter={(value: any) => [`₹${Number(value).toLocaleString()}`, 'Sales Revenue']}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                />
-                <Area type="monotone" dataKey="Sales" stroke="#2563eb" strokeWidth={3} fill="url(#salesGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {chartData.hasSalesOrders ? (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData.data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip
+                    formatter={(value: any) => [`₹${Number(value).toLocaleString()}`, 'Sales Revenue']}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                  />
+                  <Area type="monotone" dataKey="Sales" stroke="#2563eb" strokeWidth={3} fill="url(#salesGrad)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-sm text-slate-500">
+              No sales recorded for this period.
+            </div>
+          )}
         </div>
 
         {/* Inventory Alerts List (1 Column) */}
@@ -286,7 +342,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="divide-y divide-slate-100 flex-1 overflow-y-auto max-h-64">
-            {lowStockItems.length === 0 ? (
+            {products.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400 font-medium">
+                <Boxes className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                No product inventory data available.
+              </div>
+            ) : lowStockItems.length === 0 ? (
               <div className="text-center py-8 text-xs text-slate-400 font-medium">
                 <PackageCheck className="w-8 h-8 mx-auto text-emerald-400 mb-2" />
                 All product stock levels are healthy!
@@ -362,7 +423,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs text-slate-700 font-medium">
-                {orders.slice(0, 5).map((order) => (
+                {orders.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-500">
+                      No sales orders recorded yet.
+                    </td>
+                  </tr>
+                ) : orders.slice(0, 5).map((order) => (
                   <tr key={order.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5">
@@ -418,7 +485,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="divide-y divide-slate-100">
-              {sortedCustomers.map((cus, idx) => (
+              {sortedCustomers.length === 0 ? (
+                <p className="py-8 text-center text-xs text-slate-500">No customer records available yet.</p>
+              ) : sortedCustomers.map((cus, idx) => (
                 <div
                   key={cus.id}
                   onClick={() => navigate(`/customers/${cus.id}`)}

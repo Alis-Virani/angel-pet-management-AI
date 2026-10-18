@@ -165,6 +165,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   const [materials, setMaterials] = useState<RawMaterial[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submissionInProgress = useRef(false);
 
   // Form state
   const [items, setItems] = useState<DraftPurchaseItem[]>([createDraftItem()]);
@@ -290,6 +291,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionInProgress.current) return;
     setError('');
 
     const nonBlankItems = items.filter(
@@ -304,6 +306,10 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
     const invalidItem = nonBlankItems.find((item) => !isItemComplete(item));
     if (invalidItem) {
       setError('Please enter a valid material, quantity (> 0), and rate (>= 0) for all started line items.');
+      return;
+    }
+    if (isInlineMaterial && (!newMaterialName || !newMaterialCode)) {
+      setError('Please enter the name and code for the new raw material.');
       return;
     }
 
@@ -324,15 +330,10 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       };
     });
 
+    submissionInProgress.current = true;
     setLoading(true);
     try {
       if (isInlineMaterial) {
-        if (!newMaterialName || !newMaterialCode) {
-          setError('Please enter the name and code for the new raw material.');
-          setLoading(false);
-          return;
-        }
-
         const createdMaterial = await addRawMaterial({
           name: newMaterialName,
           code: newMaterialCode,
@@ -346,7 +347,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
           conversionFactor: newMaterialConversionFactor,
           piecesPerBaseUnit: newMaterialPiecesPerBaseUnit || undefined,
           unitCost: Number(completedPurchaseItems[0]?.unitCost) || 0,
-          supplier: supplierName || 'Direct Supplier'
+          supplier: supplierName.trim()
         });
         setItems((currentItems) => currentItems.map((item, index) => index === 0 ? { ...item, rawMaterialId: createdMaterial.id } : item));
         completedPurchaseItems[0] = {
@@ -359,8 +360,8 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       }
 
       await addPurchase({
-        supplierName: supplierName || 'Standard Supplier',
-        supplierPhone: supplierPhone || '',
+        supplierName: supplierName.trim(),
+        supplierPhone: supplierPhone.trim(),
         items: completedPurchaseItems,
         subtotal,
         gstRate: includeGst ? 18 : 0,
@@ -378,6 +379,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
       console.error('Failed to create purchase order:', err);
       setError('Failed to record purchase entry. Please try again.');
     } finally {
+      submissionInProgress.current = false;
       setLoading(false);
     }
   };

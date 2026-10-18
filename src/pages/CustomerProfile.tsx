@@ -192,7 +192,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onOpenNewOrder
               <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-slate-800 block">Billing / Delivery Address</span>
-                <span>{customer.address || 'GIDC Industrial Area'}</span>
+                <span>{customer.address || 'No address recorded'}</span>
               </div>
             </div>
           </div>

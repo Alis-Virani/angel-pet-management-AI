@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { Order, Dispatch, DispatchStatus, Product } from '../../types';
 import { getOrders, getDispatches, addDispatch, getProducts } from '../../services/db';
@@ -34,6 +34,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submissionInProgress = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -139,6 +140,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionInProgress.current) return;
     if (!selectedOrder) {
       setError('Please select an order to dispatch.');
       return;
@@ -202,6 +204,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
       return;
     }
 
+    submissionInProgress.current = true;
     setLoading(true);
     setError('');
     try {
@@ -211,9 +214,9 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
         customerName: selectedOrder.companyName || selectedOrder.customerName,
         items: itemsToDispatch,
         dispatchDate,
-        vehicleNumber: vehicleNumber.trim() || 'GJ-06-AX-4890',
-        driverName: driverName.trim() || 'Ramesh Patel',
-        driverPhone: driverPhone.trim() || '+91 98987 11223',
+        vehicleNumber: vehicleNumber.trim(),
+        driverName: driverName.trim(),
+        driverPhone: driverPhone.trim(),
         status,
         notes: notes.trim()
       });
@@ -224,6 +227,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
       console.error(err);
       setError(err instanceof Error ? err.message : 'Failed to create sub-delivery challan.');
     } finally {
+      submissionInProgress.current = false;
       setLoading(false);
     }
   };
@@ -399,7 +403,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
             <label className="form-label">Vehicle Number</label>
             <input
               type="text"
-              placeholder="e.g. GJ-06-AX-4890"
+              placeholder="Enter vehicle number"
               value={vehicleNumber}
               onChange={(e) => setVehicleNumber(e.target.value)}
               className="form-input"
@@ -410,7 +414,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
             <label className="form-label">Driver Name</label>
             <input
               type="text"
-              placeholder="e.g. Ramesh Patel"
+              placeholder="Enter driver name"
               value={driverName}
               onChange={(e) => setDriverName(e.target.value)}
               className="form-input"
@@ -421,7 +425,7 @@ export const NewDispatchModal: React.FC<NewDispatchModalProps> = ({
             <label className="form-label">Driver Phone</label>
             <input
               type="text"
-              placeholder="e.g. +91 98987 11223"
+              placeholder="Enter driver phone"
               value={driverPhone}
               onChange={(e) => setDriverPhone(e.target.value)}
               className="form-input"

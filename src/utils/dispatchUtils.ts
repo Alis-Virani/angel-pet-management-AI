@@ -32,15 +32,29 @@ export function getOrderDeliveryProgress(order: Order, dispatches: Dispatch[]): 
     (d) => (d.orderId && d.orderId === order.id) || (d.orderNumber && d.orderNumber === order.orderNumber)
   );
 
-  const items: ProductDeliveryProgress[] = (order.items || []).map((orderItem) => {
-    const deliveredQuantity = orderDispatches.reduce((sum, d) => {
-      const match = d.items?.find(
-        (di) => di.productId === orderItem.productId || di.productName === orderItem.productName
-      );
-      return sum + (match ? match.quantity : 0);
+  const orderedByProduct = new Map<string, { productId: string; productName: string; quantity: number }>();
+  for (const orderItem of order.items || []) {
+    const product = orderedByProduct.get(orderItem.productId);
+    if (product) {
+      product.quantity += orderItem.quantity || 0;
+    } else {
+      orderedByProduct.set(orderItem.productId, {
+        productId: orderItem.productId,
+        productName: orderItem.productName,
+        quantity: orderItem.quantity || 0
+      });
+    }
+  }
+
+  const items: ProductDeliveryProgress[] = Array.from(orderedByProduct.values()).map((orderItem) => {
+    const deliveredQuantity = orderDispatches.reduce((sum, dispatch) => {
+      const dispatchedForProduct = (dispatch.items || [])
+        .filter((item) => item.productId === orderItem.productId || item.productName === orderItem.productName)
+        .reduce((itemSum, item) => itemSum + item.quantity, 0);
+      return sum + dispatchedForProduct;
     }, 0);
 
-    const orderedQuantity = orderItem.quantity || 0;
+    const orderedQuantity = orderItem.quantity;
     const remainingQuantity = Math.max(0, orderedQuantity - deliveredQuantity);
 
     return {
