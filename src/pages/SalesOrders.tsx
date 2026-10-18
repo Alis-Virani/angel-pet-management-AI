@@ -12,12 +12,14 @@ import {
   Eye,
   IndianRupee,
   Truck,
+  CheckCircle2,
   XCircle,
   Building2,
   Printer,
   X
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 
 interface SalesOrdersProps {
   onOpenNewOrderModal: () => void;
@@ -31,6 +33,7 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
   onOpenNewDispatchModal
 }) => {
   const { t } = useTranslation();
+  const { can } = useAuth();
   const [searchParams] = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
@@ -130,13 +133,13 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
           </p>
         </div>
 
-        <button
+        {can('salesOrders', 'create') && <button
           onClick={onOpenNewOrderModal}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>{t('New Order')}</span>
-        </button>
+        </button>}
       </div>
 
       {/* Filter Toolbar */}
@@ -317,7 +320,7 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                               <Printer className="w-4 h-4" />
                             </button>
                           )}
-                          {!isAS && order.paymentStatus !== 'paid' && (
+                          {!isAS && order.paymentStatus !== 'paid' && can('finance', 'create') && can('finance', 'view') && (
                             <button
                               onClick={() => onOpenRecordPaymentModal(order.id)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
@@ -326,7 +329,7 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                               <IndianRupee className="w-4 h-4" />
                             </button>
                           )}
-                          {order.orderStatus !== 'completed' && order.orderStatus !== 'dispatched' && order.orderStatus !== 'cancelled' && (
+                          {order.orderStatus !== 'completed' && order.orderStatus !== 'dispatched' && order.orderStatus !== 'cancelled' && can('dispatch', 'create') && (
                             <button
                               onClick={() => onOpenNewDispatchModal(order.id)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors"
@@ -335,7 +338,17 @@ export const SalesOrders: React.FC<SalesOrdersProps> = ({
                               <Truck className="w-4 h-4" />
                             </button>
                           )}
-                          {(order.orderStatus === 'pending' || order.orderStatus === 'confirmed') && (
+                          {order.orderStatus === 'pending' && can('salesOrders', 'approve') && (
+                            <button
+                              onClick={() => handleUpdateStatus(order.id, 'confirmed')}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              title="Approve Order"
+                              aria-label={`Approve ${order.orderNumber}`}
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {(order.orderStatus === 'pending' || order.orderStatus === 'confirmed') && can('salesOrders', 'edit') && (
                             <button
                               onClick={() => handleUpdateStatus(order.id, 'cancelled')}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"

@@ -22,6 +22,27 @@ interface AddFinishedGoodsModalProps {
   onStockAdded?: () => void;
 }
 
+const parseProductionDate = (value: string): string | null => {
+  const match = /^(\d{2}) (\d{2}) (\d{4})$/.exec(value);
+  if (!match) return null;
+
+  const [, dayText, monthText, yearText] = match;
+  const day = Number(dayText);
+  const month = Number(monthText);
+  const year = Number(yearText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    year < 1 ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${yearText}-${monthText}-${dayText}`;
+};
+
 export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   isOpen,
   onClose,
@@ -39,7 +60,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
   const [weightPerPieceGrams, setWeightPerPieceGrams] = useState('');
   const [wastage1, setWastage1] = useState('');
   const [wastage2, setWastage2] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +73,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       setWeightPerPieceGrams('');
       setWastage1('');
       setWastage2('');
+      setDate('');
       setNotes('');
       loadData();
     }
@@ -117,6 +139,11 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const productionDate = parseProductionDate(date);
+    if (!productionDate) {
+      setError('Enter a valid production date in DD MM YYYY format.');
+      return;
+    }
     if (!selectedProduct) {
       setError('Please select a product.');
       return;
@@ -146,7 +173,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
     setLoading(true);
     setError('');
     try {
-      const batch = notes.trim() || `PROD-${date}`;
+      const batch = notes.trim() || `PROD-${productionDate}`;
       await recordRawMaterialUsage({
         materialId: selectedMaterial.id,
         materialName: selectedMaterial.name,
@@ -155,7 +182,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
         wastage1: wastage1Number || undefined,
         wastage2: wastage2Number || undefined,
         totalDeduction: totalMaterialQuantity,
-        date,
+        date: productionDate,
         productionBatch: batch,
         notes: `Consumed for ${selectedProduct.name} production`
       });
@@ -165,7 +192,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
         type: productType,
         quantityProduced: parsedQuantity,
         unit: selectedProduct.unit || 'pcs',
-        date,
+        date: productionDate,
         source: 'Production',
         notes: notes.trim()
       });
@@ -229,8 +256,18 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
             <input type="number" min={1} required placeholder="Enter quantity produced" value={quantityProduced} onChange={(e) => setQuantityProduced(e.target.value)} className="form-input font-bold" />
           </div>
           <div>
-            <label className="form-label">Production Date</label>
-            <input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className="form-input" />
+            <label className="form-label">Production Date (DD MM YYYY)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{2} [0-9]{2} [0-9]{4}"
+              maxLength={10}
+              required
+              placeholder="DD MM YYYY"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="form-input"
+            />
           </div>
         </div>
 

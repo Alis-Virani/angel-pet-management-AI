@@ -15,6 +15,7 @@ import {
   Building2,
   Tag
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface CustomersProps {
   onOpenAddCustomerModal: (customer?: Customer) => void;
@@ -26,6 +27,7 @@ export const Customers: React.FC<CustomersProps> = ({
   onOpenNewOrderModal
 }) => {
   const navigate = useNavigate();
+  const { can } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -89,6 +91,7 @@ export const Customers: React.FC<CustomersProps> = ({
         </div>
 
         <div className="flex items-center space-x-3 self-start sm:self-auto">
+          {can('salesOrders', 'create') && can('salesOrders', 'view') && (
           <button
             onClick={onOpenNewOrderModal}
             className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl shadow-md transition-colors flex items-center space-x-2"
@@ -96,7 +99,8 @@ export const Customers: React.FC<CustomersProps> = ({
             <ShoppingCart className="w-4 h-4" />
             <span>New Order</span>
           </button>
-
+          )}
+          {can('customers', 'create') && (
           <button
             onClick={() => onOpenAddCustomerModal()}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-2"
@@ -104,6 +108,7 @@ export const Customers: React.FC<CustomersProps> = ({
             <Plus className="w-4 h-4" />
             <span>Add Customer</span>
           </button>
+          )}
         </div>
       </div>
 
@@ -216,14 +221,14 @@ export const Customers: React.FC<CustomersProps> = ({
                         >
                           <Eye className="w-4 h-4" />
                         </Link>
-                        <button
+                        {can('customers', 'edit') && <button
                           onClick={() => onOpenAddCustomerModal(cus)}
                           className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                           title="Edit Customer Profile"
                         >
                           <Edit className="w-4 h-4" />
-                        </button>
-                        <button
+                        </button>}
+                        {can('customers', 'edit') && <button
                           onClick={() => handleToggleStatus(cus)}
                           className={`p-1.5 rounded-lg transition-colors ${
                             cus.status === 'active'
@@ -233,7 +238,7 @@ export const Customers: React.FC<CustomersProps> = ({
                           title={cus.status === 'active' ? 'Deactivate Customer' : 'Activate Customer'}
                         >
                           <Power className="w-4 h-4" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>

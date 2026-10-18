@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
-import { Customer, CustomerType, PriceCategory, CustomerStatus } from '../../types';
+import { Customer, CustomerType, PriceCategory, CustomerStatus, PaymentReminderFrequency } from '../../types';
 import { addCustomer, updateCustomer } from '../../services/db';
 import { User, AlertCircle } from 'lucide-react';
 
@@ -24,6 +24,9 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   const [customerType, setCustomerType] = useState<CustomerType>('Manufacturer');
   const [priceCategory, setPriceCategory] = useState<PriceCategory>('A');
   const [status, setStatus] = useState<CustomerStatus>('active');
+  const [paymentReminderEnabled, setPaymentReminderEnabled] = useState(false);
+  const [paymentReminderDate, setPaymentReminderDate] = useState('');
+  const [paymentReminderFrequency, setPaymentReminderFrequency] = useState<PaymentReminderFrequency>('one_time');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,6 +40,9 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         setCustomerType(initialCustomer.customerType || 'Manufacturer');
         setPriceCategory(initialCustomer.priceCategory || 'A');
         setStatus(initialCustomer.status || 'active');
+        setPaymentReminderEnabled(Boolean(initialCustomer.paymentReminder));
+        setPaymentReminderDate(initialCustomer.paymentReminder?.dueDate || '');
+        setPaymentReminderFrequency(initialCustomer.paymentReminder?.frequency || 'one_time');
       } else {
         setName('');
         setCompany('');
@@ -45,6 +51,9 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         setCustomerType('Manufacturer');
         setPriceCategory('A');
         setStatus('active');
+        setPaymentReminderEnabled(false);
+        setPaymentReminderDate('');
+        setPaymentReminderFrequency('one_time');
       }
       setError('');
     }
@@ -56,10 +65,31 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       setError('Name, company name, and phone number are required.');
       return;
     }
+    if (paymentReminderEnabled && !paymentReminderDate) {
+      setError('Select a due date for the payment reminder.');
+      return;
+    }
 
     setLoading(true);
     setError('');
     try {
+      const reminderDateChanged = paymentReminderDate !== (initialCustomer?.paymentReminder?.dueDate || '');
+      const reminderFrequencyChanged = paymentReminderFrequency !== (initialCustomer?.paymentReminder?.frequency || 'one_time');
+      const paymentReminder = paymentReminderEnabled
+        ? {
+            dueDate: paymentReminderDate,
+            frequency: paymentReminderFrequency,
+            dayOfMonth: initialCustomer?.paymentReminder && !reminderDateChanged
+              ? initialCustomer.paymentReminder.dayOfMonth ?? Number(paymentReminderDate.slice(-2))
+              : Number(paymentReminderDate.slice(-2)),
+            status: initialCustomer?.paymentReminder && !reminderDateChanged && !reminderFrequencyChanged
+              ? initialCustomer.paymentReminder.status
+              : 'active' as const,
+            lastCompletedAt: initialCustomer?.paymentReminder && !reminderDateChanged && !reminderFrequencyChanged
+              ? initialCustomer.paymentReminder.lastCompletedAt
+              : undefined
+          }
+        : undefined;
       if (initialCustomer) {
         await updateCustomer(initialCustomer.id, {
           name: name.trim(),
@@ -68,7 +98,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           address: address.trim(),
           customerType,
           priceCategory,
-          status
+          status,
+          paymentReminder
         });
       } else {
         await addCustomer({
@@ -78,7 +109,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           address: address.trim(),
           customerType,
           priceCategory,
-          status
+          status,
+          paymentReminder
         });
       }
 
@@ -196,6 +228,46 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             className="form-textarea"
           />
         </div>
+
+        <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-semibold text-slate-800">
+            <input
+              type="checkbox"
+              checked={paymentReminderEnabled}
+              onChange={(event) => setPaymentReminderEnabled(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            Set a payment reminder
+          </label>
+          {paymentReminderEnabled && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="customer-payment-reminder-date" className="form-label">Reminder due date</label>
+                <input
+                  id="customer-payment-reminder-date"
+                  type="date"
+                  required
+                  value={paymentReminderDate}
+                  onChange={(event) => setPaymentReminderDate(event.target.value)}
+                  className="form-input"
+                />
+              </div>
+              <div>
+                <label htmlFor="customer-payment-reminder-frequency" className="form-label">Reminder frequency</label>
+                <select
+                  id="customer-payment-reminder-frequency"
+                  value={paymentReminderFrequency}
+                  onChange={(event) => setPaymentReminderFrequency(event.target.value as PaymentReminderFrequency)}
+                  className="form-select"
+                >
+                  <option value="one_time">One-time</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </section>
 
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
           <button

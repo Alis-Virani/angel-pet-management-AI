@@ -16,6 +16,7 @@ import {
   Image as ImageIcon,
   History
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface FinishedGoodsProps {
   onOpenAddFinishedGoodsModal: () => void;
@@ -23,6 +24,7 @@ interface FinishedGoodsProps {
 }
 
 export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedGoodsModal, onStockAdded }) => {
+  const { can } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [logs, setLogs] = useState<FinishedGoodsLog[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,13 +81,13 @@ export const FinishedGoods: React.FC<FinishedGoodsProps> = ({ onOpenAddFinishedG
           </p>
         </div>
 
-        <button
+        {can('finishedGoods', 'create') && <button
           onClick={onOpenAddFinishedGoodsModal}
           className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-purple-500/20 transition-colors flex items-center space-x-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Add Finished Goods</span>
-        </button>
+        </button>}
       </div>
 
       {/* KPI Cards Grid */}

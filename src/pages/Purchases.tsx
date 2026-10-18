@@ -7,6 +7,7 @@ import {
   Search,
   Plus,
   Eye,
+  Edit,
   IndianRupee,
   CheckCircle2,
   PackageCheck,
@@ -17,6 +18,8 @@ import {
   Building2
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
+import { EditPurchaseItemsModal } from '../components/modals/EditPurchaseItemsModal';
+import { useAuth } from '../auth/AuthContext';
 
 interface PurchasesProps {
   onOpenNewPurchaseModal: () => void;
@@ -28,6 +31,7 @@ export const Purchases: React.FC<PurchasesProps> = ({
   onOpenRecordPurchasePaymentModal
 }) => {
   const { t } = useTranslation();
+  const { can } = useAuth();
   const [searchParams] = useSearchParams();
   const [purchases, setPurchases] = useState<PurchaseOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
@@ -36,6 +40,7 @@ export const Purchases: React.FC<PurchasesProps> = ({
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [purchaseToEdit, setPurchaseToEdit] = useState<PurchaseOrder | null>(null);
 
   useEffect(() => {
     loadPurchasesData();
@@ -110,20 +115,20 @@ export const Purchases: React.FC<PurchasesProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
+          {can('finance', 'create') && can('purchases', 'edit') && <button
             onClick={() => onOpenRecordPurchasePaymentModal()}
             className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl transition-colors flex items-center space-x-1.5"
           >
             <IndianRupee className="w-4 h-4 text-emerald-400" />
             <span>{t('Record Payment')}</span>
-          </button>
-          <button
+          </button>}
+          {can('purchases', 'create') && <button
             onClick={onOpenNewPurchaseModal}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-2"
           >
             <Plus className="w-4 h-4" />
             <span>{t('New Purchase Entry')}</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -239,7 +244,7 @@ export const Purchases: React.FC<PurchasesProps> = ({
       {/* Purchases Data Table */}
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[1100px] text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 <th className="py-3.5 px-4">PO Number</th>
@@ -250,7 +255,7 @@ export const Purchases: React.FC<PurchasesProps> = ({
                 <th className="py-3.5 px-4">Total Amount</th>
                 <th className="py-3.5 px-4">Payment</th>
                 <th className="py-3.5 px-4">Stock Status</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="sticky right-0 z-20 w-44 bg-slate-50 py-3.5 px-4 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
@@ -311,43 +316,61 @@ export const Purchases: React.FC<PurchasesProps> = ({
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end space-x-1.5">
+                      <td className="sticky right-0 z-10 w-44 bg-white py-3.5 px-4 group-hover:bg-slate-50">
+                        <div className="grid grid-cols-2 gap-1.5">
                           <Link
                             to={`/purchases/${po.id}`}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-2 text-[10px] font-semibold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
                             title="View Purchase Details"
+                            aria-label={`View purchase ${po.purchaseNumber}`}
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-4 h-4 shrink-0" />
+                            <span>View</span>
                           </Link>
 
-                          {!po.stockAdded && (po.status === 'pending' || po.status === 'ordered' as any) && (
+                          {can('purchases', 'edit') && <button
+                            onClick={() => setPurchaseToEdit(po)}
+                            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-2 text-[10px] font-semibold text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                            title="Edit Purchase"
+                            aria-label={`Edit purchase ${po.purchaseNumber}`}
+                          >
+                            <Edit className="w-4 h-4 shrink-0" />
+                            <span>Edit</span>
+                          </button>}
+
+                          {!po.stockAdded && (po.status === 'pending' || po.status === 'ordered' as any) && (can('purchases', 'edit') || can('purchases', 'approve')) && (
                             <button
                               onClick={() => handleReceiveStock(po.id)}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-2 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors"
                               title="Mark as Received & Add Stock"
+                              aria-label={`Mark purchase ${po.purchaseNumber} as received and add stock`}
                             >
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              <CheckCircle2 className="w-4 h-4 shrink-0" />
+                              <span>Receive</span>
                             </button>
                           )}
 
-                          {po.paymentStatus !== 'paid' && (
+                          {po.paymentStatus !== 'paid' && can('finance', 'create') && can('purchases', 'edit') && (
                             <button
                               onClick={() => onOpenRecordPurchasePaymentModal(po.id)}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-purple-600 hover:bg-purple-50 transition-colors"
+                              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-2 text-[10px] font-semibold text-purple-700 hover:bg-purple-50 transition-colors"
                               title="Record Supplier Payment"
+                              aria-label={`Record payment for purchase ${po.purchaseNumber}`}
                             >
-                              <IndianRupee className="w-4 h-4" />
+                              <IndianRupee className="w-4 h-4 shrink-0" />
+                              <span>Payment</span>
                             </button>
                           )}
 
-                          <button
+                          {can('purchases', 'delete') && <button
                             onClick={() => handleDelete(po.id)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-2 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 transition-colors"
                             title="Delete Purchase Entry"
+                            aria-label={`Delete purchase ${po.purchaseNumber}`}
                           >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                            <Trash2 className="w-4 h-4 shrink-0" />
+                            <span>Delete</span>
+                          </button>}
                         </div>
                       </td>
                     </tr>
@@ -358,6 +381,19 @@ export const Purchases: React.FC<PurchasesProps> = ({
           </table>
         </div>
       </div>
+
+      {purchaseToEdit && (
+        <EditPurchaseItemsModal
+          isOpen
+          purchase={purchaseToEdit}
+          onClose={() => setPurchaseToEdit(null)}
+          onSaved={(updatedPurchase) => {
+            setPurchases((current) =>
+              current.map((purchase) => purchase.id === updatedPurchase.id ? updatedPurchase : purchase)
+            );
+          }}
+        />
+      )}
     </div>
   );
 };

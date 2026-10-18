@@ -24,6 +24,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
 
 interface DispatchProps {
   onOpenNewDispatchModal: () => void;
@@ -118,6 +119,7 @@ const S = {
 export const DispatchPage: React.FC<DispatchProps> = ({
   onOpenNewDispatchModal
 }) => {
+  const { can } = useAuth();
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -716,13 +718,13 @@ export const DispatchPage: React.FC<DispatchProps> = ({
           </p>
         </div>
 
-        <button
+        {can('dispatch', 'create') && <button
           onClick={onOpenNewDispatchModal}
           className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-sky-500/20 transition-colors flex items-center space-x-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>New Sub-Delivery</span>
-        </button>
+        </button>}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════
@@ -872,7 +874,7 @@ export const DispatchPage: React.FC<DispatchProps> = ({
         </div>
 
         <div>
-          <select
+          {can('dispatch', 'edit') || can('dispatch', 'approve') ? <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="w-full px-3 py-2 bg-slate-50 text-xs font-medium text-slate-700 rounded-xl border border-slate-200 focus:bg-white"
@@ -882,7 +884,7 @@ export const DispatchPage: React.FC<DispatchProps> = ({
             <option value="ready">Ready for Pickup</option>
             <option value="dispatched">Dispatched (In Transit)</option>
             <option value="delivered">Delivered / Completed</option>
-          </select>
+          </select> : null}
         </div>
       </div>
 
@@ -958,10 +960,19 @@ export const DispatchPage: React.FC<DispatchProps> = ({
                             onChange={(e) => handleStatusChange(d.id, e.target.value as DispatchStatus)}
                             className="px-2 py-1 bg-slate-100 text-[11px] font-semibold text-slate-800 rounded-lg border border-slate-200 focus:bg-white"
                           >
-                            <option value="pending">Pending</option>
-                            <option value="ready">Ready</option>
-                            <option value="dispatched">Dispatched</option>
-                            <option value="delivered">Delivered</option>
+                            {can('dispatch', 'edit') ? (
+                              <>
+                                <option value="pending">Pending</option>
+                                <option value="ready">Ready</option>
+                                <option value="dispatched">Dispatched</option>
+                                <option value="delivered">Delivered</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value={d.status}>{d.status}</option>
+                                {d.status === 'pending' && <option value="ready">ready</option>}
+                              </>
+                            )}
                           </select>
                         </div>
                       </td>

@@ -17,6 +17,7 @@ import {
   formatNumberDisplay
 } from '../utils/packetUtils';
 import { useTranslation } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 
 type MaterialForm = {
   materialName: string;
@@ -42,6 +43,7 @@ const emptyForm: MaterialForm = {
 
 export const PurchasedMaterials: React.FC = () => {
   const { confirm } = useTranslation();
+  const { can } = useAuth();
   const [materials, setMaterials] = useState<PurchasedMaterial[]>([]);
   const [savedMaterialNames, setSavedMaterialNames] = useState<string[]>([]);
   const [savedSuppliers, setSavedSuppliers] = useState<string[]>([]);
@@ -58,7 +60,7 @@ export const PurchasedMaterials: React.FC = () => {
     try {
       const [purchasedMaterials, rawMaterials] = await Promise.all([
         getPurchasedMaterials(),
-        getRawMaterials()
+        can('rawMaterials', 'view') ? getRawMaterials() : Promise.resolve([])
       ]);
       setMaterials(purchasedMaterials);
       setSavedMaterialNames(Array.from(new Set([
@@ -79,7 +81,7 @@ export const PurchasedMaterials: React.FC = () => {
 
   useEffect(() => {
     loadMaterials();
-  }, []);
+  }, [can]);
 
   const filteredMaterials = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -214,9 +216,9 @@ export const PurchasedMaterials: React.FC = () => {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Purchased Materials</h1>
           <p className="mt-0.5 text-xs font-medium text-slate-500">Track raw material purchases, stock weight, and equivalent pieces.</p>
         </div>
-        <button onClick={() => openForm()} className="btn-primary">
+        {can('purchasedMaterials', 'create') && <button onClick={() => openForm()} className="btn-primary">
           <Plus className="h-4 w-4" /> Add Purchased Material
-        </button>
+        </button>}
       </div>
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">{error}</div>}
@@ -251,8 +253,8 @@ export const PurchasedMaterials: React.FC = () => {
                   <td className="px-4 py-3.5">{formatNumberDisplay(material.weightPerPieceGrams)} g</td>
                   <td className="px-4 py-3.5 font-bold text-emerald-700">{formatNumberDisplay(material.totalPieces ?? material.equivalentPieces)} pcs</td>
                   <td className="px-4 py-3.5"><div className="flex justify-end gap-1">
-                    <button title="Edit purchased material" onClick={() => openForm(material)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Pencil className="h-4 w-4" /></button>
-                    <button title="Delete purchased material" onClick={() => handleDelete(material)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                    {can('purchasedMaterials', 'edit') && <button title="Edit purchased material" onClick={() => openForm(material)} className="rounded-lg p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600"><Pencil className="h-4 w-4" /></button>}
+                    {can('purchasedMaterials', 'delete') && <button title="Delete purchased material" onClick={() => handleDelete(material)} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
                   </div></td>
                 </tr>)}
             </tbody>

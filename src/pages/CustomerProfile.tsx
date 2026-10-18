@@ -15,12 +15,14 @@ import {
   Plus,
   Power
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface CustomerProfileProps {
   onOpenNewOrderModal: () => void;
 }
 
 export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onOpenNewOrderModal }) => {
+  const { can } = useAuth();
   const { customerId } = useParams<{ customerId: string }>();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
@@ -28,12 +30,15 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onOpenNewOrder
 
   useEffect(() => {
     loadCustomerData();
-  }, [customerId]);
+  }, [customerId, can]);
 
   const loadCustomerData = async () => {
     setLoading(true);
     try {
-      const [cusList, ordList] = await Promise.all([getCustomers(), getOrders()]);
+      const [cusList, ordList] = await Promise.all([
+        getCustomers(),
+        can('salesOrders', 'view') ? getOrders() : Promise.resolve([])
+      ]);
       const found = cusList.find((c) => c.id === customerId);
       if (found) {
         setCustomer(found);
@@ -107,7 +112,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onOpenNewOrder
         </div>
 
         <div className="flex items-center space-x-3 self-start sm:self-auto">
-          <button
+          {can('customers', 'edit') && <button
             onClick={handleToggleStatus}
             className={`px-3 py-2.5 font-semibold text-xs rounded-xl border transition-colors flex items-center space-x-1.5 ${
               customer.status === 'active'
@@ -117,15 +122,15 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onOpenNewOrder
           >
             <Power className="w-4 h-4" />
             <span>{customer.status === 'active' ? 'Deactivate Customer' : 'Activate Customer'}</span>
-          </button>
+          </button>}
 
-          <button
+          {can('salesOrders', 'create') && (can('salesOrders', 'view') || can('productDirectory', 'view')) && <button
             onClick={onOpenNewOrderModal}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-2"
           >
             <Plus className="w-4 h-4" />
             <span>New Order for Customer</span>
-          </button>
+          </button>}
         </div>
       </div>
 

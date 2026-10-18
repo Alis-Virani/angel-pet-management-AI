@@ -2,6 +2,16 @@ export type PriceCategory = 'A' | 'B' | 'C';
 export type CustomerType = 'Distributor' | 'Manufacturer' | 'Wholesaler' | 'Retailer' | 'Direct Customer';
 export type CustomerStatus = 'active' | 'inactive';
 
+export type PaymentReminderFrequency = 'one_time' | 'weekly' | 'monthly';
+
+export interface CustomerPaymentReminder {
+  dueDate: string;
+  frequency: PaymentReminderFrequency;
+  status: 'active' | 'completed';
+  dayOfMonth?: number;
+  lastCompletedAt?: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -15,6 +25,37 @@ export interface Customer {
   totalOrders: number;
   totalSpent: number;
   gstin?: string;
+  paymentReminder?: CustomerPaymentReminder;
+}
+
+export const AUTHORITY_MODULES = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'salesOrders', label: 'Sales & Orders' },
+  { key: 'purchases', label: 'Purchases' },
+  { key: 'purchasedMaterials', label: 'Purchased Materials' },
+  { key: 'customers', label: 'Customers' },
+  { key: 'suppliers', label: 'Suppliers' },
+  { key: 'analytics', label: 'Analytics' },
+  { key: 'productDirectory', label: 'Product Directory' },
+  { key: 'finishedGoods', label: 'Finished Goods' },
+  { key: 'rawMaterials', label: 'Raw Materials' },
+  { key: 'finance', label: 'Finance' },
+  { key: 'dispatch', label: 'Dispatch' },
+  { key: 'documents', label: 'Documents' }
+] as const;
+
+export type AuthorityModule = typeof AUTHORITY_MODULES[number]['key'];
+export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
+export type ModulePermissions = Record<AuthorityModule, PermissionAction[]>;
+
+export interface EmployeeProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  active: boolean;
+  permissions: ModulePermissions;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type SupplierStatus = 'active' | 'inactive';
@@ -142,11 +183,11 @@ export interface Order {
   notes?: string;
   gstApplied?: boolean;
   billType?: 'kachha' | 'pakka';
-  paymentType?: 'cash_memo' | 'debit_memo';
+  paymentType?: 'cash_memo' | 'debit_memo' | 'delivery_challan';
   orderType?: OrderType; // 'REGULAR' by default for backward compatibility
 }
 
-export type PaymentDocumentType = 'cash_memo' | 'debit_memo';
+export type PaymentDocumentType = 'cash_memo' | 'debit_memo' | 'delivery_challan';
 
 export type DispatchStatus = 'pending' | 'ready' | 'dispatched' | 'delivered';
 

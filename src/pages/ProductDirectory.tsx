@@ -15,12 +15,14 @@ import {
   Filter,
   FolderPlus
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface ProductDirectoryProps {
   onOpenAddProductModal: (defaultType?: ProductType, product?: Product) => void;
 }
 
 export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddProductModal }) => {
+  const { can } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | ProductType>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -152,21 +154,21 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
         </div>
 
         <div className="flex items-center space-x-3 self-start md:self-auto">
-          <button
+          {can('productDirectory', 'create') && <button
             onClick={handleAddCategory}
             className="px-4 py-2.5 bg-[#132247] hover:bg-[#1e3266] text-white font-semibold text-xs rounded-xl shadow-sm transition-all flex items-center space-x-2"
           >
             <FolderPlus className="w-4 h-4" />
             <span>+ Add Category</span>
-          </button>
+          </button>}
 
-          <button
+          {can('productDirectory', 'create') && <button
             onClick={() => onOpenAddProductModal(activeTab === 'all' ? 'bottle' : activeTab)}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center space-x-2"
           >
             <Plus className="w-4 h-4" />
             <span>+ Add Product</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -274,7 +276,6 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {filteredProducts.map((p) => {
             const isLowStock = p.currentStock <= p.minimumStock;
-            const categoryBadge = p.category || (p.type === 'bottle' ? 'BOTTLE' : 'CAP');
             const displayImageUrl = getProductImageUrl(p);
 
             return (
@@ -313,14 +314,10 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
                 {/* Product Information */}
                 <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                   <div>
-                    {/* Header Row: Title & Badge */}
-                    <div className="flex items-start justify-between gap-2">
+                    <div>
                       <h3 className="font-extrabold text-slate-900 text-sm tracking-tight uppercase line-clamp-1" title={p.name}>
                         {p.name}
                       </h3>
-                      <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-md uppercase shrink-0 tracking-wide">
-                        {categoryBadge}
-                      </span>
                     </div>
 
                     {/* Subtext: SKU & Description */}
@@ -404,20 +401,20 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
                     </div>
 
                     <div className="flex items-center space-x-1">
-                      <button
+                      {can('productDirectory', 'edit') && <button
                         onClick={() => onOpenAddProductModal(p.type, p)}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                         title="Edit Product"
                       >
                         <Edit className="w-4 h-4" />
-                      </button>
-                      <button
+                      </button>}
+                      {can('productDirectory', 'delete') && <button
                         onClick={() => handleDelete(p.id)}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
                         title="Delete Product"
                       >
                         <Trash2 className="w-4 h-4" />
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 </div>
@@ -429,4 +426,3 @@ export const ProductDirectory: React.FC<ProductDirectoryProps> = ({ onOpenAddPro
     </div>
   );
 };
-

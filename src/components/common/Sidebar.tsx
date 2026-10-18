@@ -20,6 +20,8 @@ import {
   X
 } from 'lucide-react';
 import { useTranslation } from '../../i18n';
+import { AuthorityModule } from '../../types';
+import { useAuth } from '../../auth/AuthContext';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -28,21 +30,22 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/sales', label: 'Sales & Orders', icon: ShoppingCart },
-  { path: '/purchases', label: 'Purchases', icon: ShoppingBag },
-  { path: '/purchased-materials', label: 'Purchased Materials', icon: Warehouse },
-  { path: '/customers', label: 'Customers', icon: Users },
-  { path: '/suppliers', label: 'Suppliers', icon: Truck },
-  { path: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { path: '/products', label: 'Product Directory', icon: Package },
-  { path: '/finished-goods', label: 'Finished Goods', icon: Boxes },
-  { path: '/raw-materials', label: 'Raw Materials', icon: Layers },
-  { path: '/finance', label: 'Finance', icon: IndianRupee },
-  { path: '/dispatch', label: 'Dispatch', icon: Truck },
-  { path: '/documents', label: 'Documents', icon: FileText },
-  { path: '/settings', label: 'Settings', icon: Settings },
+const navItems: Array<{ path: string; label: string; icon: React.ComponentType<{ className?: string }>; module?: AuthorityModule; adminOnly?: boolean }> = [
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
+  { path: '/sales', label: 'Sales & Orders', icon: ShoppingCart, module: 'salesOrders' },
+  { path: '/purchases', label: 'Purchases', icon: ShoppingBag, module: 'purchases' },
+  { path: '/purchased-materials', label: 'Purchased Materials', icon: Warehouse, module: 'purchasedMaterials' },
+  { path: '/customers', label: 'Customers', icon: Users, module: 'customers' },
+  { path: '/suppliers', label: 'Suppliers', icon: Truck, module: 'suppliers' },
+  { path: '/analytics', label: 'Analytics', icon: BarChart3, module: 'analytics' },
+  { path: '/products', label: 'Product Directory', icon: Package, module: 'productDirectory' },
+  { path: '/finished-goods', label: 'Finished Goods', icon: Boxes, module: 'finishedGoods' },
+  { path: '/raw-materials', label: 'Raw Materials', icon: Layers, module: 'rawMaterials' },
+  { path: '/finance', label: 'Finance', icon: IndianRupee, module: 'finance' },
+  { path: '/dispatch', label: 'Dispatch', icon: Truck, module: 'dispatch' },
+  { path: '/documents', label: 'Documents', icon: FileText, module: 'documents' },
+  { path: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
+  { path: '/settings/authority', label: 'User Authority', icon: ShieldCheck, adminOnly: true },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -52,6 +55,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile
 }) => {
   const { t } = useTranslation();
+  const { can, isAdmin, profile, user } = useAuth();
+  const visibleItems = navItems.filter((item) => {
+    if ('adminOnly' in item && item.adminOnly) return isAdmin;
+    return item.module ? can(item.module, 'view') : isAdmin;
+  });
   return (
     <>
       {/* Mobile Drawer Overlay Backdrop */}
@@ -105,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation List */}
         <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = item.icon;
             return (
               <NavLink
@@ -136,9 +144,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             {(!collapsed || mobileOpen) && (
               <div className="flex flex-col truncate">
-                <span className="text-xs font-semibold text-slate-200 truncate">{t('Admin Owner')}</span>
+                <span className="text-xs font-semibold text-slate-200 truncate">{profile?.displayName || 'Owner'}</span>
                 <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
-                  <ShieldCheck className="w-3 h-3" /> {t('System Admin')}
+                  <ShieldCheck className="w-3 h-3" /> {isAdmin ? t('System Admin') : user?.email}
                 </span>
               </div>
             )}

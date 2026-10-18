@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   FileText
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface PurchaseDetailsProps {
   onOpenRecordPurchasePaymentModal?: (purchaseId?: string) => void;
@@ -26,6 +27,7 @@ export const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({
 }) => {
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const navigate = useNavigate();
+  const { can } = useAuth();
   const [purchase, setPurchase] = useState<PurchaseOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -118,14 +120,14 @@ export const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({
             <span>Print PO</span>
           </button>
 
-          <button
+          {can('purchases', 'edit') && <button
             onClick={() => setIsEditModalOpen(true)}
             className="px-3.5 py-2 bg-slate-900 text-white font-semibold text-xs rounded-xl hover:bg-slate-800 transition-colors"
           >
             Edit Bill
-          </button>
+          </button>}
 
-          {!purchase.stockAdded && (
+          {!purchase.stockAdded && (can('purchases', 'edit') || can('purchases', 'approve')) && (
             <button
               onClick={handleMarkReceived}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-emerald-500/20 transition-colors flex items-center space-x-1.5"
@@ -135,7 +137,7 @@ export const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({
             </button>
           )}
 
-          {purchase.paymentStatus !== 'paid' && onOpenRecordPurchasePaymentModal && (
+          {purchase.paymentStatus !== 'paid' && onOpenRecordPurchasePaymentModal && can('finance', 'create') && can('purchases', 'edit') && (
             <button
               onClick={() => onOpenRecordPurchasePaymentModal(purchase.id)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-1.5"
@@ -311,7 +313,7 @@ export const PurchaseDetails: React.FC<PurchaseDetailsProps> = ({
               </div>
             </div>
 
-            {purchase.paymentStatus !== 'paid' && onOpenRecordPurchasePaymentModal && (
+            {purchase.paymentStatus !== 'paid' && onOpenRecordPurchasePaymentModal && can('finance', 'create') && can('purchases', 'edit') && (
               <button
                 onClick={() => onOpenRecordPurchasePaymentModal(purchase.id)}
                 className="w-full mt-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center justify-center space-x-2"

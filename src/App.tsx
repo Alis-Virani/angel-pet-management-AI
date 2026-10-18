@@ -19,6 +19,8 @@ import { Finance } from './pages/Finance';
 import { DispatchPage } from './pages/Dispatch';
 import { Documents } from './pages/Documents';
 import { SettingsPage } from './pages/SettingsPage';
+import { AuthorityPage } from './pages/AuthorityPage';
+import { AdminRoute, PermissionRoute } from './auth/AuthContext';
 
 // Modals
 import { NewOrderModal } from './components/modals/NewOrderModal';
@@ -125,6 +127,7 @@ export function App() {
           <Route
             path="/"
             element={
+              <PermissionRoute module="dashboard">
               <Dashboard
                 key={`dash-${refreshKey}`}
                 onOpenNewOrderModal={() => setIsNewOrderOpen(true)}
@@ -133,131 +136,158 @@ export function App() {
                 onOpenNewDispatchModal={() => openNewDispatch()}
                 onOpenAddFinishedGoodsModal={() => setIsAddFinishedGoodsOpen(true)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/sales"
             element={
+              <PermissionRoute module="salesOrders">
               <SalesOrders
                 key={`sales-${refreshKey}`}
                 onOpenNewOrderModal={() => setIsNewOrderOpen(true)}
                 onOpenRecordPaymentModal={(id) => openRecordPayment(id)}
                 onOpenNewDispatchModal={(id) => openNewDispatch(id)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/sales/:orderId"
             element={
+              <PermissionRoute module="salesOrders">
               <OrderDetails
                 key={`ord-${refreshKey}`}
                 onOpenRecordPaymentModal={(id) => openRecordPayment(id)}
                 onOpenNewDispatchModal={(id) => openNewDispatch(id)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/customers"
             element={
+              <PermissionRoute module="customers">
               <Customers
                 key={`cus-${refreshKey}`}
                 onOpenAddCustomerModal={(cus) => openAddCustomer(cus)}
                 onOpenNewOrderModal={() => setIsNewOrderOpen(true)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/customers/:customerId"
             element={
+              <PermissionRoute module="customers">
               <CustomerProfile
                 key={`cusprof-${refreshKey}`}
                 onOpenNewOrderModal={() => setIsNewOrderOpen(true)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/suppliers"
-            element={<Suppliers key={`sup-${refreshKey}`} onOpenAddSupplierModal={(supplier) => openAddSupplier(supplier)} />}
+            element={<PermissionRoute module="suppliers"><Suppliers key={`sup-${refreshKey}`} onOpenAddSupplierModal={(supplier) => openAddSupplier(supplier)} /></PermissionRoute>}
           />
-          <Route path="/suppliers/:supplierId" element={<SupplierProfile key={`supprof-${refreshKey}`} />} />
-          <Route path="/analytics" element={<Analytics key={`analytic-${refreshKey}`} />} />
+          <Route path="/suppliers/:supplierId" element={<PermissionRoute module="suppliers"><SupplierProfile key={`supprof-${refreshKey}`} /></PermissionRoute>} />
+          <Route path="/analytics" element={<PermissionRoute module="analytics"><Analytics key={`analytic-${refreshKey}`} /></PermissionRoute>} />
           <Route
             path="/products"
             element={
+              <PermissionRoute module="productDirectory">
               <ProductDirectory
                 key={`prod-${refreshKey}`}
                 onOpenAddProductModal={(type, prod) => openAddProduct(type, prod)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/finished-goods"
             element={
+              <PermissionRoute module="finishedGoods">
               <FinishedGoods
                 key={`fg-${refreshKey}`}
                 onOpenAddFinishedGoodsModal={() => setIsAddFinishedGoodsOpen(true)}
                 onStockAdded={triggerRefresh}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/purchases"
             element={
+              <PermissionRoute module="purchases">
               <Purchases
                 key={`pur-${refreshKey}`}
                 onOpenNewPurchaseModal={() => setIsNewPurchaseOpen(true)}
                 onOpenRecordPurchasePaymentModal={(id) => openRecordPurchasePayment(id)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/purchases/:purchaseId"
             element={
+              <PermissionRoute module="purchases">
               <PurchaseDetails
                 key={`purdt-${refreshKey}`}
                 onOpenRecordPurchasePaymentModal={(id) => openRecordPurchasePayment(id)}
               />
+              </PermissionRoute>
             }
           />
-          <Route path="/purchased-materials" element={<PurchasedMaterials key={`pm-${refreshKey}`} />} />
+          <Route path="/purchased-materials" element={<PermissionRoute module="purchasedMaterials"><PurchasedMaterials key={`pm-${refreshKey}`} /></PermissionRoute>} />
           <Route
             path="/raw-materials"
             element={
+              <PermissionRoute module="rawMaterials">
               <RawMaterials
                 key={`rm-${refreshKey}`}
                 onOpenNewPurchaseModal={() => setIsNewPurchaseOpen(true)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/finance"
             element={
+              <PermissionRoute module="finance">
               <Finance
                 key={`fin-${refreshKey}`}
                 onOpenRecordPaymentModal={() => openRecordPayment()}
+                onOpenRecordPurchasePaymentModal={(id) => openRecordPurchasePayment(id)}
                 onOpenAddExpenseModal={() => setIsAddExpenseOpen(true)}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/dispatch"
             element={
+              <PermissionRoute module="dispatch">
               <DispatchPage
                 key={`disp-${refreshKey}`}
                 onOpenNewDispatchModal={() => openNewDispatch()}
               />
+              </PermissionRoute>
             }
           />
           <Route
             path="/documents"
             element={
+              <PermissionRoute module="documents">
               <Documents
                 key={`doc-${refreshKey}`}
                 onOpenUploadDocumentModal={() => setIsUploadDocumentOpen(true)}
               />
+              </PermissionRoute>
             }
           />
-          <Route path="/settings" element={<SettingsPage key={`set-${refreshKey}`} />} />
+          <Route path="/settings" element={<AdminRoute><SettingsPage key={`set-${refreshKey}`} /></AdminRoute>} />
+          <Route path="/settings/authority" element={<AdminRoute><AuthorityPage key={`authority-${refreshKey}`} /></AdminRoute>} />
         </Route>
       </Routes>
 

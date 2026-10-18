@@ -2,51 +2,161 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    match /customers/{document} {
-      allow read, write: if isSignedIn();
+    function ownerAdmin() {
+      return signedIn() && request.auth.token.admin == true;
     }
-    match /dispatches/{document} {
-      allow read, write: if isSignedIn();
+
+    function employeeProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.active == true;
     }
-    match /documents/{document} {
-      allow read, write: if isSignedIn();
+
+    function can(module, action) {
+      return ownerAdmin()
+        || (employeeProfile()
+          && action in get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.permissions[module]);
     }
-    match /expenses/{document} {
-      allow read, write: if isSignedIn();
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
-    match /finishedGoodsLogs/{document} {
-      allow read, write: if isSignedIn();
+
+    match /userProfiles/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || ownerAdmin());
+      allow list, create, update, delete: if ownerAdmin();
     }
-    match /orders/{document} {
-      allow read, write: if isSignedIn();
+
+    match /customers/{id} {
+      allow read: if can('customers', 'view')
+        || can('salesOrders', 'view')
+        || can('finance', 'view');
+      allow create: if can('customers', 'create');
+      allow update: if can('customers', 'edit')
+        || (can('finance', 'edit') && changedOnly(['paymentReminder']))
+        || (can('salesOrders', 'create') && changedOnly(['totalOrders', 'totalSpent']));
+      allow delete: if can('customers', 'delete');
     }
-    match /payments/{document} {
-      allow read, write: if isSignedIn();
+    match /suppliers/{id} {
+      allow read: if can('suppliers', 'view');
+      allow create: if can('suppliers', 'create');
+      allow update: if can('suppliers', 'edit');
+      allow delete: if can('suppliers', 'delete');
     }
-    match /paymentReminders/{document} {
-      allow read, write: if isSignedIn();
+    match /dispatches/{id} {
+      allow read: if can('dispatch', 'view') || can('salesOrders', 'view') || can('finance', 'view');
+      allow create: if can('dispatch', 'create');
+      allow update: if can('dispatch', 'edit')
+        || (can('dispatch', 'approve')
+          && changedOnly(['status'])
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'ready');
+      allow delete: if can('dispatch', 'delete');
     }
-    match /products/{document} {
-      allow read, write: if isSignedIn();
+    match /documents/{id} {
+      allow read: if can('documents', 'view');
+      allow create: if can('documents', 'create');
+      allow update: if can('documents', 'edit');
+      allow delete: if can('documents', 'delete');
     }
-    match /purchasedMaterials/{document} {
-      allow read, write: if isSignedIn();
+    match /expenses/{id} {
+      allow read: if can('finance', 'view');
+      allow create: if can('finance', 'create');
+      allow update: if can('finance', 'edit') || can('finance', 'approve');
+      allow delete: if can('finance', 'delete');
     }
-    match /purchases/{document} {
-      allow read, write: if isSignedIn();
+    match /finishedGoodsLogs/{id} {
+      allow read: if can('finishedGoods', 'view');
+      allow create: if can('finishedGoods', 'create');
+      allow update: if can('finishedGoods', 'edit');
+      allow delete: if can('finishedGoods', 'delete');
     }
-    match /rawMaterials/{document} {
-      allow read, write: if isSignedIn();
+    match /orders/{id} {
+      allow read: if can('salesOrders', 'view')
+        || can('finance', 'view')
+        || can('dispatch', 'view')
+        || can('dashboard', 'view');
+      allow create: if can('salesOrders', 'create');
+      allow update: if can('salesOrders', 'edit')
+        || (can('salesOrders', 'approve')
+          && changedOnly(['orderStatus'])
+          && resource.data.orderStatus == 'pending'
+          && request.resource.data.orderStatus == 'confirmed')
+        || (can('finance', 'create') && changedOnly(['paidAmount', 'paymentStatus']))
+        || (can('salesOrders', 'create') && changedOnly(['signedCopy']));
+      allow delete: if can('salesOrders', 'delete');
     }
-    match /rawMaterialUsage/{document} {
-      allow read, write: if isSignedIn();
+    match /payments/{id} {
+      allow read: if can('finance', 'view') || can('dashboard', 'view');
+      allow create: if can('finance', 'create');
+      allow update: if can('finance', 'edit');
+      allow delete: if can('finance', 'delete');
     }
-    match /settings/{document} {
-      allow read, write: if isSignedIn();
+    match /paymentReminders/{id} {
+      allow read: if can('finance', 'view');
+      allow create: if can('finance', 'create');
+      allow update: if can('finance', 'edit');
+      allow delete: if can('finance', 'delete');
+    }
+    match /products/{id} {
+      allow read: if can('productDirectory', 'view')
+        || can('salesOrders', 'view')
+        || can('finishedGoods', 'view')
+        || can('dispatch', 'view')
+        || can('dashboard', 'view');
+      allow create: if can('productDirectory', 'create');
+      allow update: if can('productDirectory', 'edit')
+        || ((can('finishedGoods', 'create') || can('dispatch', 'create'))
+          && changedOnly(['currentStock']));
+      allow delete: if can('productDirectory', 'delete');
+    }
+    match /purchasedMaterials/{id} {
+      allow read: if can('purchasedMaterials', 'view');
+      allow create: if can('purchasedMaterials', 'create');
+      allow update: if can('purchasedMaterials', 'edit');
+      allow delete: if can('purchasedMaterials', 'delete');
+    }
+    match /purchases/{id} {
+      allow read: if can('purchases', 'view') || can('finance', 'view');
+      allow create: if can('purchases', 'create');
+      allow update: if can('purchases', 'edit')
+        || (can('purchases', 'approve')
+          && changedOnly(['status'])
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'received')
+        || (can('purchases', 'approve')
+          && changedOnly(['stockAdded'])
+          && resource.data.status == 'received'
+          && request.resource.data.stockAdded == true);
+      allow delete: if can('purchases', 'delete');
+    }
+    match /rawMaterials/{id} {
+      allow read: if can('rawMaterials', 'view')
+        || can('purchases', 'view')
+        || can('purchasedMaterials', 'view')
+        || can('finishedGoods', 'view')
+        || can('dashboard', 'view');
+      allow create: if can('rawMaterials', 'create') || can('purchases', 'create') || can('purchases', 'edit') || can('purchases', 'approve');
+      allow update: if can('rawMaterials', 'edit')
+        || ((can('rawMaterials', 'create') || can('purchases', 'edit') || can('purchases', 'approve'))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentStock', 'unitCost', 'supplier', 'lastRestocked', 'status']))
+        || ((can('finishedGoods', 'create') || can('dispatch', 'create'))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentStock', 'status']));
+      allow delete: if can('rawMaterials', 'delete');
+    }
+    match /rawMaterialUsage/{id} {
+      allow read: if can('rawMaterials', 'view') || can('finishedGoods', 'view');
+      allow create: if can('rawMaterials', 'create') || can('finishedGoods', 'create') || can('dispatch', 'create');
+      allow update: if can('rawMaterials', 'edit');
+      allow delete: if can('rawMaterials', 'delete');
+    }
+    match /settings/{id} {
+      allow read: if employeeProfile() || ownerAdmin();
+      allow write: if ownerAdmin();
     }
   }
 }

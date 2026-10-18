@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -18,7 +18,7 @@ const getEnvVar = (key: string): string => {
   return '';
 };
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: getEnvVar('VITE_FIREBASE_API_KEY'),
   authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN'),
   projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID'),
@@ -47,13 +47,7 @@ if (isLiveFirebaseConfigured) {
     auth = getAuth(app);
     db = getFirestore(app);
     storage = getStorage(app);
-    firebaseReady = signInAnonymously(auth)
-      .then(() => {
-        console.info('Firebase Firestore and Storage initialized with authenticated access');
-      })
-      .catch((error) => {
-        console.warn('Firebase anonymous authentication failed; using LocalStorage fallback:', error);
-      });
+    firebaseReady = Promise.resolve();
   } catch (error) {
     console.warn('Firebase initialization warning:', error);
   }

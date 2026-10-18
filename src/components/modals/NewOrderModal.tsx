@@ -393,10 +393,11 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     const unitsPerPacket = getProductUnitsPerPacket(product);
 
     if (cleanedValue === '') {
+      const loosePieces = Number(current?.loosePieces || 0);
       updateItem(id, {
         packetCount: '',
-        quantity: '',
-        loosePieces: ''
+        quantity: loosePieces || '',
+        loosePieces: current?.loosePieces ?? ''
       });
       return;
     }
@@ -405,15 +406,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
     const isValidPositive = Number.isFinite(numPackets) && numPackets > 0;
 
     if (unitsPerPacket && isValidPositive) {
-      const derivedQuantity = calculatePacketUnits(numPackets, unitsPerPacket);
+      const loosePieces = Number(current?.loosePieces || 0);
+      const derivedQuantity = calculatePacketUnits(numPackets, unitsPerPacket) + loosePieces;
       updateItem(id, {
         packetCount: cleanedValue,
-        quantity: derivedQuantity + Number(current?.loosePieces || 0)
+        quantity: derivedQuantity
       });
     } else {
       updateItem(id, {
         packetCount: cleanedValue,
-        quantity: ''
+        quantity: Number(current?.loosePieces || 0) || ''
       });
     }
   };
@@ -430,41 +432,43 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
       let packetCount: number | string = '';
       const numPackets = Number(current.packetCount);
       const numQty = Number(current.quantity);
+      let loosePieces: number | string = '';
 
       if (Number.isFinite(numQty) && numQty > 0) {
-        packetCount = Math.floor(numQty / unitsPerPacket);
-      } else if (Number.isFinite(numPackets) && numPackets >= 0) {
-        packetCount = numPackets;
+        const fullPackets = Math.floor(numQty / unitsPerPacket);
+        packetCount = fullPackets > 0 ? fullPackets : '';
+        loosePieces = Math.round((numQty % unitsPerPacket) * 10000) / 10000;
+      } else if (current.packetCount !== '' && Number.isFinite(numPackets) && numPackets >= 0) {
+        packetCount = current.packetCount;
+        loosePieces = current.loosePieces;
+      } else if (Number(current.loosePieces) > 0) {
+        loosePieces = current.loosePieces;
       }
 
-      const derivedQuantity = typeof packetCount === 'number' && packetCount > 0
-        ? calculatePacketUnits(packetCount, unitsPerPacket)
-        : (packetCount !== '' && Number(packetCount) > 0 ? calculatePacketUnits(Number(packetCount), unitsPerPacket) : '');
-      const derivedLoosePieces = Number.isFinite(numQty) && numQty > 0
-        ? Math.round((numQty % unitsPerPacket) * 10000) / 10000
-        : Number(current.loosePieces || 0);
+      const derivedQuantity = calculatePacketUnits(Number(packetCount || 0), unitsPerPacket) + Number(loosePieces || 0);
 
       updateItem(id, {
         sellByPacket: true,
-        packetCount: packetCount !== '' ? packetCount : '',
-        loosePieces: derivedLoosePieces,
-        quantity: Number(derivedQuantity || 0) + derivedLoosePieces
+        packetCount,
+        loosePieces,
+        quantity: derivedQuantity || ''
       });
     } else {
       // Switching to Pieces mode: derive quantity in pieces from packets if quantity is empty
-      let quantity: number | string = '';
+      let quantity: number | string = Number(current.loosePieces || 0) || '';
       const numPackets = Number(current.packetCount);
       const numQty = Number(current.quantity);
 
       if (Number.isFinite(numQty) && numQty > 0) {
         quantity = numQty;
-      } else if (Number.isFinite(numPackets) && numPackets > 0) {
-        quantity = calculatePacketUnits(numPackets, unitsPerPacket);
+      } else if (Number.isFinite(numPackets) && numPackets >= 0) {
+        const total = calculatePacketUnits(numPackets, unitsPerPacket) + Number(current.loosePieces || 0);
+        quantity = total || '';
       }
 
       updateItem(id, {
         sellByPacket: false,
-        quantity: quantity !== '' ? quantity : '',
+        quantity,
         packetCount: current.packetCount,
         loosePieces: current.loosePieces
       });
@@ -1155,7 +1159,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                                   type="text"
                                   inputMode="decimal"
                                   step="any"
-                                  required={Boolean(item.productId)}
+                                  required={Boolean(item.productId) && Number(item.loosePieces || 0) <= 0}
                                   placeholder={productAllowsFractionalPackets ? "0" : "1"}
                                   value={item.packetCount === '' ? '' : String(item.packetCount)}
                                   onChange={(e) => handlePacketCountChange(item.id, e.target.value)}
@@ -1177,12 +1181,12 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                                   min="0"
                                   max={Math.max(0, unitsPerPacket - 1)}
                                   step="1"
-                                  required={Boolean(item.productId)}
+                                  required={Boolean(item.productId) && Number(item.packetCount || 0) <= 0}
                                   placeholder="0"
                                   value={item.loosePieces === '' ? '' : String(item.loosePieces)}
                                   onChange={(e) => {
                                     const value = e.target.value;
-                                    const loose = value === '' ? '' : Math.max(0, parseInt(value, 10) || 0);
+                                    const loose = value === '' ? '' : value;
                                     const packets = Number(item.packetCount || 0);
                                     updateItem(item.id, {
                                       loosePieces: loose,
@@ -1558,13 +1562,13 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
           </div>
         </div>
 
-        {/* Payment Document Type (Cash Memo vs Debit Memo) - Only for Regular Orders */}
+        {/* Payment Document Type - Only for Regular Orders */}
         {orderType === 'REGULAR' ? (
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
             <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
               {t('Payment Document Type')}
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <label
                 className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
                   paymentType === 'cash_memo'
@@ -1617,6 +1621,34 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {t('Payment due later. Outstanding balance recorded; record payment when received.')}
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                  paymentType === 'delivery_challan'
+                    ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="paymentType"
+                  value="delivery_challan"
+                  checked={paymentType === 'delivery_challan'}
+                  onChange={() => setPaymentType('delivery_challan')}
+                  className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-xs text-slate-900">{t('Delivery Challan')}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase">
+                      {t('Payment pending')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {t('No payment is recorded. Create or print the delivery challan from Sales & Orders.')}
                   </p>
                 </div>
               </label>

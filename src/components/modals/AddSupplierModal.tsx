@@ -32,8 +32,8 @@ export const AddSupplierModal: React.FC<AddSupplierModalProps> = ({ isOpen, onCl
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !company.trim() || !phone.trim()) {
-      setError('Contact name, company name, and phone number are required.');
+    if (!name.trim() || !company.trim()) {
+      setError('Contact name and company name are required.');
       return;
     }
     setLoading(true);
@@ -61,7 +61,7 @@ export const AddSupplierModal: React.FC<AddSupplierModalProps> = ({ isOpen, onCl
           <div><label className="form-label">Company Name</label><input required value={company} onChange={(e) => setCompany(e.target.value)} className="form-input" /></div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div><label className="form-label">Phone Number</label><input required value={phone} onChange={(e) => setPhone(e.target.value)} className="form-input" /></div>
+          <div><label className="form-label">Phone Number (Optional)</label><input value={phone} onChange={(e) => setPhone(e.target.value)} className="form-input" /></div>
           <div><label className="form-label">Account Status</label><select value={status} onChange={(e) => setStatus(e.target.value as SupplierStatus)} className="form-select"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
         </div>
         <div><label className="form-label">Address</label><textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} className="form-textarea" /></div>

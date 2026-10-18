@@ -29,6 +29,7 @@ import {
   FileCheck,
   Plus
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 interface OrderDetailsProps {
   onOpenRecordPaymentModal: (orderId?: string) => void;
@@ -82,6 +83,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
   onOpenRecordPaymentModal,
   onOpenNewDispatchModal
 }) => {
+  const { can } = useAuth();
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const [order, setOrder] = useState<Order | null>(null);
@@ -623,14 +625,14 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
               <Printer className="w-3.5 h-3.5" />
               <span>Print Invoice</span>
             </button>
-            <button
+            {can('salesOrders', 'edit') && <button
               onClick={() => setIsEditModalOpen(true)}
               className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl transition-colors flex items-center space-x-1.5"
             >
               <Edit className="w-3.5 h-3.5" />
               <span>Edit Order</span>
-            </button>
-            {!isAS && order.paymentStatus !== 'paid' && order.paymentType !== 'cash_memo' && (
+            </button>}
+            {!isAS && order.paymentStatus !== 'paid' && order.paymentType !== 'cash_memo' && can('finance', 'create') && can('finance', 'view') && (
               <button
                 onClick={() => onOpenRecordPaymentModal(order.id)}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl transition-colors shadow-sm shadow-emerald-500/20 flex items-center space-x-1.5"
@@ -644,7 +646,7 @@ export const OrderDetails: React.FC<OrderDetailsProps> = ({
                 Payment not applicable for AS Order
               </span>
             )}
-            {orderProgress && orderProgress.totalRemainingQuantity > 0 && order.orderStatus !== 'cancelled' && (
+            {orderProgress && orderProgress.totalRemainingQuantity > 0 && order.orderStatus !== 'cancelled' && can('dispatch', 'create') && (
               <button
                 onClick={() => onOpenNewDispatchModal(order.id)}
                 className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs rounded-xl transition-colors shadow-sm shadow-sky-500/20 flex items-center space-x-1.5"

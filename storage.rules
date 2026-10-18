@@ -1,0 +1,33 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function ownerAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function employeeCan(module, action) {
+      let profilePath = /databases/(default)/documents/userProfiles/$(request.auth.uid);
+      return ownerAdmin() || (
+        request.auth != null
+        && firestore.exists(profilePath)
+        && firestore.get(profilePath).data.active == true
+        && action in firestore.get(profilePath).data.permissions[module]
+      );
+    }
+
+    match /documents/{fileName} {
+      allow read: if employeeCan('documents', 'view');
+      allow create: if employeeCan('documents', 'create');
+      allow update: if employeeCan('documents', 'edit');
+      allow delete: if employeeCan('documents', 'delete');
+    }
+
+    match /orders/{orderId}/signed-copy/{fileName} {
+      allow read: if employeeCan('salesOrders', 'view');
+      allow create: if employeeCan('salesOrders', 'create');
+      allow update: if employeeCan('salesOrders', 'edit');
+      allow delete: if employeeCan('salesOrders', 'edit') || employeeCan('salesOrders', 'delete');
+    }
+  }
+}

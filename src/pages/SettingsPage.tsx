@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Settings } from '../types';
-import { getSettings, updateSettings, seedDatabase } from '../services/db';
+import { getSettings, updateSettings } from '../services/db';
 import {
   Settings as SettingsIcon,
   Building,
   Save,
-  Database,
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
@@ -46,18 +45,6 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleResetSeed = async () => {
-    try {
-      await seedDatabase(true);
-      setSuccessMsg(t('Database successfully reset to initial reference demo data!'));
-      setTimeout(() => {
-        window.location.reload();
-      }, 800);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   if (!settings) return <div className="p-8 text-center text-xs text-slate-400 font-medium">{t('Loading settings...')}</div>;
 
   return (
@@ -66,7 +53,7 @@ export const SettingsPage: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{t('Settings & Company Profile')}</h1>
         <p className="text-xs text-slate-500 font-medium mt-0.5">
-          {t('Configure company parameters, GST invoicing rules, and demo database state')}
+          {t('Configure company parameters and GST invoicing rules')}
         </p>
       </div>
 
@@ -200,23 +187,6 @@ export const SettingsPage: React.FC = () => {
           </button>
         </div>
       </form>
-
-      {/* Seed Reset Card */}
-      <div className="bg-amber-50/60 p-6 rounded-3xl border border-amber-200 space-y-3">
-        <div className="flex items-center space-x-2 text-xs font-bold text-amber-900 uppercase tracking-wider">
-          <Database className="w-4 h-4 text-amber-600" />
-          <span>{t('Demo Database Control')}</span>
-        </div>
-        <p className="text-xs text-amber-800">
-          Reset all database collections (customers, products, orders, expenses, dispatches) to the reference application's initial demo seed dataset.
-        </p>
-        <button
-          onClick={handleResetSeed}
-          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs rounded-xl shadow-sm transition-colors"
-        >
-          {t('Reset Demo Seed Data')}
-        </button>
-      </div>
     </div>
   );
 };

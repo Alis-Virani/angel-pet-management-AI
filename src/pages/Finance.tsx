@@ -1,17 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Order, Payment, Expense, PurchaseOrder, Customer, Settings, PaymentReminder } from '../types';
-import { getOrders, getPayments, getExpenses, getPurchases, getCustomers, getSettings, deleteExpense, getPaymentReminders, savePaymentReminder } from '../services/db';
-import { StatCard } from '../components/common/StatCard';
+import { Order, Payment, Expense, PurchaseOrder, Customer, Settings, PaymentReminder, PaymentReminderFrequency, Dispatch } from '../types';
+import { getOrders, getPayments, getExpenses, getPurchases, getCustomers, getSettings, deleteExpense, getPaymentReminders, savePaymentReminder, updateCustomer, getDispatches } from '../services/db';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import {
   IndianRupee,
-  TrendingUp,
-  CreditCard,
   Plus,
-  ArrowUpRight,
-  ArrowDownRight,
   Trash2,
   AlertTriangle,
   Loader2,
@@ -20,22 +15,45 @@ import {
   CalendarDays,
   RefreshCw,
   Filter,
-  BookOpen,
-  BellRing,
   Save,
-  X
+  X,
+  Truck
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 
 interface FinanceProps {
   onOpenRecordPaymentModal: () => void;
+  onOpenRecordPurchasePaymentModal: (purchaseId?: string) => void;
   onOpenAddExpenseModal: () => void;
 }
 
 type StatementFilter = 'all' | 'sales' | 'purchases';
 type DateFilter = 'all' | 'today' | 'week' | 'month' | 'custom';
 type PartyType = 'customer' | 'supplier';
-type ReminderStatus = 'upcoming' | 'due_today' | 'overdue' | 'not_set';
+type ReminderStatus = 'upcoming' | 'due_today' | 'overdue' | 'not_set' | 'completed';
+
+const getNextReminderDate = (
+  dueDate: string,
+  frequency: PaymentReminderFrequency,
+  today: string,
+  dayOfMonth = Number(dueDate.slice(-2))
+): string => {
+  const [year, month, day] = dueDate.split('-').map(Number);
+  let next = new Date(Date.UTC(year, month - 1, day));
+  do {
+    if (frequency === 'weekly') {
+      next.setUTCDate(next.getUTCDate() + 7);
+    } else {
+      const nextMonth = next.getUTCMonth() + 1;
+      const nextYear = next.getUTCFullYear() + Math.floor(nextMonth / 12);
+      const monthIndex = nextMonth % 12;
+      const finalDay = new Date(Date.UTC(nextYear, monthIndex + 1, 0)).getUTCDate();
+      next = new Date(Date.UTC(nextYear, monthIndex, Math.min(dayOfMonth, finalDay)));
+    }
+  } while (next.toISOString().slice(0, 10) <= today);
+  return next.toISOString().slice(0, 10);
+};
 
 export type DayLedgerType = 'Sale' | 'Customer Payment' | 'Purchase' | 'Supplier Payment' | 'Expense';
 
@@ -78,6 +96,18 @@ const formatCurrency = (value: number | undefined | null) => {
   const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
   return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
+const exportRowsToCsv = (filename: string, rows: Array<Record<string, string | number>>) => {
+  if (rows.length === 0) return;
+  const columns = Object.keys(rows[0]);
+  const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+  const csv = [columns.map(escapeCsv).join(','), ...rows.map((row) => columns.map((column) => escapeCsv(row[column])).join(','))].join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 const toDateKey = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -88,17 +118,26 @@ const ALL_PARTIES_ID = '__all_parties__';
 
 export const Finance: React.FC<FinanceProps> = ({
   onOpenRecordPaymentModal,
+  onOpenRecordPurchasePaymentModal,
   onOpenAddExpenseModal
 }) => {
   const { t } = useTranslation();
+  const { can } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [purchases, setPurchases] = useState<PurchaseOrder[]>([]);
+  const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [reminders, setReminders] = useState<PaymentReminder[]>([]);
-  const [activeTab, setActiveTab] = useState<'ledger' | 'party' | 'statement' | 'reminders' | 'collections' | 'expenses'>('ledger');
+  const [activeTab, setActiveTab] = useState<'sales' | 'purchase' | 'dispatch' | 'expenses'>('sales');
+  const [salesView, setSalesView] = useState<'orders' | 'payments' | 'reminders' | 'party' | 'ledger'>('orders');
+  const [purchaseView, setPurchaseView] = useState<'bills' | 'payments' | 'party'>('bills');
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const [purchasePaymentSearch, setPurchasePaymentSearch] = useState('');
+  const [dispatchSearch, setDispatchSearch] = useState('');
+  const [expenseSearch, setExpenseSearch] = useState('');
   
   // Day-to-Day Ledger filter states
   const [dayLedgerDateFilter, setDayLedgerDateFilter] = useState<DateFilter>('all');
@@ -118,7 +157,7 @@ export const Finance: React.FC<FinanceProps> = ({
   const [partyEndDate, setPartyEndDate] = useState('');
 
   // Statement filter states
-  const [statementFilter, setStatementFilter] = useState<StatementFilter>('all');
+  const [statementFilter, setStatementFilter] = useState<StatementFilter>('sales');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [statementSearch, setStatementSearch] = useState('');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -138,6 +177,9 @@ export const Finance: React.FC<FinanceProps> = ({
   const [reminderNotes, setReminderNotes] = useState('');
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderError, setReminderError] = useState('');
+  const [editingCustomerReminder, setEditingCustomerReminder] = useState<Customer | null>(null);
+  const [customerReminderDate, setCustomerReminderDate] = useState('');
+  const [customerReminderFrequency, setCustomerReminderFrequency] = useState<PaymentReminderFrequency>('one_time');
 
   useEffect(() => {
     loadFinanceData();
@@ -146,19 +188,21 @@ export const Finance: React.FC<FinanceProps> = ({
   const loadFinanceData = async () => {
     setLoading(true);
     try {
-      const [ordList, pymtList, expList, purchaseList, customerList, settingsData, reminderList] = await Promise.all([
+      const [ordList, pymtList, expList, purchaseList, customerList, settingsData, reminderList, dispatchList] = await Promise.all([
         getOrders(),
         getPayments(),
         getExpenses(),
         getPurchases(),
         getCustomers(),
         getSettings(),
-        getPaymentReminders()
+        getPaymentReminders(),
+        getDispatches()
       ]);
       setOrders(ordList);
       setPayments(pymtList);
       setExpenses(expList);
       setPurchases(purchaseList);
+      setDispatches(dispatchList);
       setCustomers(customerList);
       setSettings(settingsData);
       const activeReminderOrders = ordList.filter((order) => order.orderStatus !== 'cancelled' && order.orderType !== 'AS' && order.totalAmount > order.paidAmount);
@@ -204,9 +248,6 @@ export const Finance: React.FC<FinanceProps> = ({
   const totalSales = activeOrders.reduce((sum, o) => sum + o.totalAmount, 0);
   const totalCollections = payments.filter((payment) => activeOrderIds.has(payment.orderId)).reduce((sum, p) => sum + p.amount, 0);
   const pendingCollections = Math.max(0, totalSales - totalCollections);
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const netBalance = totalCollections - totalExpenses;
-
   const todayKey = toDateKey(new Date());
   const paymentTotalsByOrder = payments.reduce<Record<string, number>>((totals, payment) => {
     totals[payment.orderId] = (totals[payment.orderId] || 0) + payment.amount;
@@ -233,6 +274,92 @@ export const Finance: React.FC<FinanceProps> = ({
     .filter((row) => !reminderDueDateFilter || row.reminder.dueDate === reminderDueDateFilter)
     .filter((row) => reminderCustomerFilter === 'all' || row.reminder.customerId === reminderCustomerFilter)
     .filter((row) => reminderPaymentFilter === 'all' || row.order.paymentStatus === reminderPaymentFilter);
+
+  const allCustomerReminderRows = customers.flatMap((customer) => {
+    const reminder = customer.paymentReminder;
+    if (!reminder) return [];
+    const customerOrders = orders.filter((order) =>
+      order.customerId === customer.id && order.orderStatus !== 'cancelled' && order.orderType !== 'AS'
+    );
+    const total = customerOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const paid = customerOrders.reduce((sum, order) =>
+      sum + (paymentTotalsByOrder[order.id] ?? order.paidAmount), 0
+    );
+    const outstanding = Math.max(0, total - paid);
+    if (outstanding <= 0) return [];
+    const status: ReminderStatus = reminder.status === 'completed'
+      ? 'completed'
+      : reminder.dueDate < todayKey ? 'overdue' : reminder.dueDate === todayKey ? 'due_today' : 'upcoming';
+    const daysOverdue = status === 'overdue'
+      ? Math.floor((Date.parse(`${todayKey}T00:00:00`) - Date.parse(`${reminder.dueDate}T00:00:00`)) / 86400000)
+      : 0;
+    const paymentStatus = paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partially_paid';
+    return [{ customer, reminder, outstanding, paymentStatus, status, daysOverdue }];
+  });
+  const customerReminderRows = allCustomerReminderRows
+    .filter((row) => reminderStatusFilter === 'all' || row.status === reminderStatusFilter)
+    .filter((row) => !reminderDueDateFilter || row.reminder.dueDate === reminderDueDateFilter)
+    .filter((row) => reminderCustomerFilter === 'all' || row.customer.id === reminderCustomerFilter)
+    .filter((row) => reminderPaymentFilter === 'all' || row.paymentStatus === reminderPaymentFilter);
+
+  const openCustomerReminderEditor = (customer: Customer) => {
+    setEditingCustomerReminder(customer);
+    setCustomerReminderDate(customer.paymentReminder?.dueDate || '');
+    setCustomerReminderFrequency(customer.paymentReminder?.frequency || 'one_time');
+    setReminderError('');
+  };
+
+  const handleCustomerReminderSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingCustomerReminder) return;
+    if (!customerReminderDate) {
+      setReminderError('Select a reminder due date.');
+      return;
+    }
+    setReminderSaving(true);
+    setReminderError('');
+    try {
+      const updated = await updateCustomer(editingCustomerReminder.id, {
+        paymentReminder: {
+          dueDate: customerReminderDate,
+          frequency: customerReminderFrequency,
+          dayOfMonth: Number(customerReminderDate.slice(-2)),
+          status: 'active'
+        }
+      });
+      setCustomers((current) => current.map((customer) => customer.id === updated.id ? updated : customer));
+      setEditingCustomerReminder(null);
+    } catch (error) {
+      console.error('Failed to reschedule customer payment reminder:', error);
+      setReminderError(error instanceof Error ? error.message : 'Failed to reschedule reminder.');
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const handleCustomerReminderComplete = async (customer: Customer) => {
+    const reminder = customer.paymentReminder;
+    if (!reminder) return;
+    try {
+      const completed = reminder.frequency === 'one_time';
+      const updated = await updateCustomer(customer.id, {
+        paymentReminder: {
+          ...reminder,
+          dueDate: completed ? reminder.dueDate : getNextReminderDate(
+            reminder.dueDate,
+            reminder.frequency,
+            todayKey,
+            reminder.dayOfMonth
+          ),
+          status: completed ? 'completed' : 'active',
+          lastCompletedAt: new Date().toISOString()
+        }
+      });
+      setCustomers((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (error) {
+      console.error('Failed to complete customer payment reminder:', error);
+    }
+  };
 
   const openReminderEditor = (reminder: PaymentReminder) => {
     setEditingReminder(reminder);
@@ -499,6 +626,77 @@ export const Finance: React.FC<FinanceProps> = ({
     })
     .sort((first, second) => second.date.localeCompare(first.date));
 
+  const dateMatchesFilter = (date: string): boolean => {
+    if (dateFilter === 'all') return true;
+    if (dateFilter === 'today') return date === today;
+    if (dateFilter === 'week') return date >= weekStartKey && date <= today;
+    if (dateFilter === 'month') return date >= monthStart && date <= today;
+    return (!customStartDate || date >= customStartDate) && (!customEndDate || date <= customEndDate);
+  };
+
+  const filteredPayments = payments
+    .filter((payment) => dateMatchesFilter(payment.paymentDate))
+    .filter((payment) => {
+      const query = paymentSearch.trim().toLowerCase();
+      return !query || [payment.receiptNumber, payment.customerName, payment.orderNumber, payment.notes || '']
+        .some((value) => value.toLowerCase().includes(query));
+    })
+    .sort((first, second) => second.paymentDate.localeCompare(first.paymentDate));
+
+  const supplierPaymentRows = purchases.flatMap((purchase) => {
+    const recordedPayments = purchase.paymentRecords || [];
+    const legacyAmount = Math.max(0, (purchase.paidAmount || 0) - recordedPayments.reduce((sum, payment) => sum + payment.amount, 0));
+    return [
+      ...recordedPayments.map((payment) => ({
+        id: payment.id,
+        purchaseId: purchase.id,
+        purchaseNumber: purchase.purchaseNumber,
+        supplierName: purchase.supplierName,
+        amount: payment.amount,
+        paymentDate: payment.paymentDate || purchase.purchaseDate,
+        paymentMethod: payment.paymentMethod || 'cash',
+        notes: payment.notes || ''
+      })),
+      ...(legacyAmount > 0 ? [{
+        id: `legacy-${purchase.id}`,
+        purchaseId: purchase.id,
+        purchaseNumber: purchase.purchaseNumber,
+        supplierName: purchase.supplierName,
+        amount: legacyAmount,
+        paymentDate: purchase.purchaseDate,
+        paymentMethod: 'cash',
+        notes: 'Previously recorded payment'
+      }] : [])
+    ];
+  });
+
+  const filteredSupplierPayments = supplierPaymentRows
+    .filter((payment) => dateMatchesFilter(payment.paymentDate))
+    .filter((payment) => {
+      const query = purchasePaymentSearch.trim().toLowerCase();
+      return !query || [payment.purchaseNumber, payment.supplierName, payment.notes]
+        .some((value) => value.toLowerCase().includes(query));
+    })
+    .sort((first, second) => second.paymentDate.localeCompare(first.paymentDate));
+
+  const filteredDispatches = dispatches
+    .filter((dispatch) => dateMatchesFilter(dispatch.dispatchDate))
+    .filter((dispatch) => {
+      const query = dispatchSearch.trim().toLowerCase();
+      return !query || [dispatch.dispatchNumber, dispatch.orderNumber, dispatch.customerName, dispatch.vehicleNumber || '', dispatch.driverName || '', dispatch.status]
+        .some((value) => value.toLowerCase().includes(query));
+    })
+    .sort((first, second) => second.dispatchDate.localeCompare(first.dispatchDate));
+
+  const filteredExpenses = expenses
+    .filter((expense) => dateMatchesFilter(expense.expenseDate))
+    .filter((expense) => {
+      const query = expenseSearch.trim().toLowerCase();
+      return !query || [expense.id, expense.category, expense.description, expense.paymentMethod, expense.status]
+        .some((value) => value.toLowerCase().includes(query));
+    })
+    .sort((first, second) => second.expenseDate.localeCompare(first.expenseDate));
+
   const salesRows = filteredStatementRows.filter((row) => row.type === 'SALE');
   const purchaseRows = filteredStatementRows.filter((row) => row.type === 'PURCHASE');
   const statementTotals = {
@@ -695,144 +893,86 @@ export const Finance: React.FC<FinanceProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
+          {activeTab === 'expenses' && can('finance', 'create') && <button
             onClick={onOpenAddExpenseModal}
             className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-lg transition-colors flex items-center space-x-1.5 shadow-2xs"
           >
             <Plus className="w-3.5 h-3.5 text-rose-400" />
             <span>Add Expense</span>
-          </button>
-          <button
+          </button>}
+          {activeTab === 'sales' && can('finance', 'create') && <button
             onClick={onOpenRecordPaymentModal}
             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center space-x-1.5 shadow-2xs"
           >
             <IndianRupee className="w-3.5 h-3.5" />
-            <span>Record Payment</span>
-          </button>
+            <span>Record Customer Payment</span>
+          </button>}
+          {activeTab === 'purchase' && can('finance', 'create') && can('purchases', 'edit') && <button
+            onClick={() => onOpenRecordPurchasePaymentModal()}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center space-x-1.5 shadow-2xs"
+          >
+            <IndianRupee className="w-3.5 h-3.5" />
+            <span>Record Supplier Payment</span>
+          </button>}
         </div>
       </div>
 
-      {/* Financial KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard
-          title="Total Sales"
-          value={`₹${(totalSales / 100000).toFixed(2)}L`}
-          icon={IndianRupee}
-          subtitle="Gross Invoiced"
-          iconBgColor="bg-blue-50"
-          iconTextColor="text-blue-600"
-        />
-        <StatCard
-          title="Amount Collected"
-          value={`₹${(totalCollections / 100000).toFixed(2)}L`}
-          icon={TrendingUp}
-          change="Received"
-          changeType="positive"
-          subtitle="Bank & UPI Receipts"
-          iconBgColor="bg-emerald-50"
-          iconTextColor="text-emerald-600"
-        />
-        <StatCard
-          title="Pending Collection"
-          value={`₹${(pendingCollections / 100000).toFixed(2)}L`}
-          icon={CreditCard}
-          change="Outstanding"
-          changeType="negative"
-          subtitle="Receivables from clients"
-          iconBgColor="bg-amber-50"
-          iconTextColor="text-amber-600"
-        />
-        <StatCard
-          title="Factory Expenses"
-          value={`₹${(totalExpenses / 100000).toFixed(2)}L`}
-          icon={ArrowDownRight}
-          change="Paid Out"
-          changeType="neutral"
-          subtitle="Materials & Utilities"
-          iconBgColor="bg-rose-50"
-          iconTextColor="text-rose-600"
-        />
-        <StatCard
-          title="Net Cash Balance"
-          value={`₹${(netBalance / 100000).toFixed(2)}L`}
-          icon={ArrowUpRight}
-          change={netBalance >= 0 ? 'Surplus' : 'Deficit'}
-          changeType={netBalance >= 0 ? 'positive' : 'negative'}
-          subtitle="Collections minus expenses"
-          iconBgColor="bg-purple-50"
-          iconTextColor="text-purple-600"
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {(activeTab === 'sales'
+          ? [['Sales orders', totalSales], ['Customer payments', totalCollections], ['Outstanding', pendingCollections]]
+          : activeTab === 'purchase'
+            ? [
+                ['Purchase bills', purchases.filter((purchase) => purchase.status !== 'cancelled').reduce((sum, purchase) => sum + purchase.totalAmount, 0)],
+                ['Supplier payments', purchases.reduce((sum, purchase) => sum + (purchase.paidAmount || 0), 0)],
+                ['Supplier outstanding', purchases.filter((purchase) => purchase.status !== 'cancelled').reduce((sum, purchase) => sum + Math.max(0, purchase.totalAmount - (purchase.paidAmount || 0)), 0)]
+              ]
+            : activeTab === 'dispatch'
+              ? [['Delivery challans', filteredDispatches.length], ['Delivered', filteredDispatches.filter((dispatch) => dispatch.status === 'delivered').length], ['In progress', filteredDispatches.filter((dispatch) => dispatch.status !== 'delivered').length]]
+              : [['Expenses', filteredExpenses.length], ['Recorded amount', filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0)], ['Pending expenses', filteredExpenses.filter((expense) => expense.status === 'pending').reduce((sum, expense) => sum + expense.amount, 0)]]
+        ).map(([label, value]) => (
+          <div key={String(label)} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{typeof value === 'number' && label !== 'Delivery challans' && label !== 'Delivered' && label !== 'In progress' && label !== 'Expenses' ? formatCurrency(value) : value}</div>
+          </div>
+        ))}
       </div>
 
       {/* Tab Switcher & Data Table */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs p-5 space-y-4">
+      <div id="finance-tab-content" className="bg-white rounded-xl border border-slate-200/80 shadow-2xs p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-          <div className="inline-flex flex-wrap p-1 bg-slate-100/80 rounded-lg border border-slate-200/60 gap-1 text-xs">
-            <button
-              onClick={() => setActiveTab('ledger')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all flex items-center gap-1.5 ${
-                activeTab === 'ledger'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-              <span>{t('Day-to-Day Ledger')}</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('party')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all ${
-                activeTab === 'party'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('Party-wise Statement')}
-            </button>
-            <button
-              onClick={() => setActiveTab('statement')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all ${
-                activeTab === 'statement'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('Sales & Purchase Statement')}
-            </button>
-            <button
-              onClick={() => setActiveTab('reminders')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all flex items-center gap-1.5 ${
-                activeTab === 'reminders'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BellRing className="w-3.5 h-3.5 text-amber-600" />
-              <span>{t('Collection Reminders')} ({reminderRows.length})</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('collections')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all ${
-                activeTab === 'collections'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('Customer Payment Receipts')} ({payments.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('expenses')}
-              className={`px-3.5 py-1.5 font-semibold rounded-md transition-all ${
-                activeTab === 'expenses'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {t('Expense Vouchers')} ({expenses.length})
-            </button>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              ['sales', 'Sales'],
+              ['purchase', 'Purchase'],
+              ['dispatch', 'Dispatch'],
+              ['expenses', 'Expenses']
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setActiveTab(tab);
+                  if (tab === 'sales') {
+                    setSalesView('orders');
+                    setStatementFilter('sales');
+                    setPartyType('customer');
+                    setSelectedPartyId(customers[0]?.id || ALL_PARTIES_ID);
+                  } else if (tab === 'purchase') {
+                    setPurchaseView('bills');
+                    setStatementFilter('purchases');
+                    setPartyType('supplier');
+                    setSelectedPartyId(purchases[0]?.supplierName || ALL_PARTIES_ID);
+                  }
+                }}
+                className={`min-h-10 rounded-lg px-4 text-xs font-bold transition-colors ${
+                  activeTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          {activeTab === 'party' && (
+          {((activeTab === 'sales' && salesView === 'party') || (activeTab === 'purchase' && purchaseView === 'party')) && (
             <button
               onClick={() => setShowPartyFilters(!showPartyFilters)}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 font-semibold text-xs rounded-lg transition-colors border border-slate-200/80 shadow-2xs"
@@ -843,7 +983,42 @@ export const Finance: React.FC<FinanceProps> = ({
           )}
         </div>
 
-        {activeTab === 'ledger' ? (
+        {(activeTab === 'sales' || activeTab === 'purchase') && (
+          <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-3">
+            {(activeTab === 'sales'
+              ? [
+                  ['orders', 'Orders & balances'],
+                  ['payments', 'Customer payments'],
+                  ['reminders', `Reminders (${reminderRows.length + customerReminderRows.length})`],
+                  ['party', 'Customer ledger'],
+                  ['ledger', 'Day ledger']
+                ]
+              : [
+                  ['bills', 'Purchase bills'],
+                  ['payments', 'Supplier payments'],
+                  ['party', 'Supplier ledger']
+                ]
+            ).map(([view, label]) => {
+              const selected = activeTab === 'sales' ? salesView === view : purchaseView === view;
+              return (
+                <button
+                  key={view}
+                  onClick={() => {
+                    if (activeTab === 'sales') setSalesView(view as typeof salesView);
+                    else setPurchaseView(view as typeof purchaseView);
+                  }}
+                  className={`min-h-9 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                    selected ? 'border-slate-300 bg-white text-slate-900 shadow-sm' : 'border-transparent text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {activeTab === 'sales' && salesView === 'ledger' ? (
           <div className="space-y-4">
             {/* Day-to-Day Ledger Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1012,7 +1187,7 @@ export const Finance: React.FC<FinanceProps> = ({
               </table>
             </div>
           </div>
-        ) : activeTab === 'party' ? (
+        ) : (activeTab === 'sales' && salesView === 'party') || (activeTab === 'purchase' && purchaseView === 'party') ? (
           <div className="space-y-4">
             {showPartyFilters && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1078,44 +1253,36 @@ export const Finance: React.FC<FinanceProps> = ({
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-100"><div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{partyType === 'customer' ? 'Outstanding Receivable' : 'Outstanding Payable'}</div><div className="text-lg font-bold text-amber-700 mt-1">{formatCurrency(partySummary.balance)}</div></div>
             </div>
           </div>
-        ) : activeTab === 'statement' ? (
+        ) : (activeTab === 'sales' && salesView === 'orders') || (activeTab === 'purchase' && purchaseView === 'bills') ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-              {[
-                ['Total Sales', statementTotals.sales, 'text-blue-700', 'bg-blue-50'],
-                ['Sales Collected', statementTotals.salesPaid, 'text-emerald-700', 'bg-emerald-50'],
-                ['Sales Outstanding', statementTotals.sales - statementTotals.salesPaid, 'text-amber-700', 'bg-amber-50'],
-                ['Total Purchases', statementTotals.purchases, 'text-indigo-700', 'bg-indigo-50'],
-                ['Purchase Paid', statementTotals.purchasesPaid, 'text-emerald-700', 'bg-emerald-50'],
-                ['Purchase Outstanding', statementTotals.purchases - statementTotals.purchasesPaid, 'text-rose-700', 'bg-rose-50'],
-                ['Net Cash Flow', statementTotals.salesPaid - statementTotals.purchasesPaid, statementTotals.salesPaid - statementTotals.purchasesPaid >= 0 ? 'text-emerald-700' : 'text-rose-700', statementTotals.salesPaid - statementTotals.purchasesPaid >= 0 ? 'bg-emerald-50' : 'bg-rose-50']
-              ].map(([label, amount, textColor, background]) => (
-                <div key={String(label)} className={`p-3 rounded-xl ${background} border border-slate-100`}>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {(activeTab === 'sales'
+                ? [
+                    ['Sales orders', statementTotals.sales],
+                    ['Customer payments', statementTotals.salesPaid],
+                    ['Outstanding balance', statementTotals.sales - statementTotals.salesPaid]
+                  ]
+                : [
+                    ['Purchase bills', statementTotals.purchases],
+                    ['Supplier payments', statementTotals.purchasesPaid],
+                    ['Outstanding balance', statementTotals.purchases - statementTotals.purchasesPaid]
+                  ]
+              ).map(([label, amount]) => (
+                <div key={String(label)} className="p-3 rounded-xl border border-slate-100 bg-slate-50">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
-                  <div className={`mt-1 text-sm font-bold ${textColor}`}>{formatCurrency(Number(amount))}</div>
+                  <div className="mt-1 text-sm font-bold text-slate-800">{formatCurrency(Number(amount))}</div>
                 </div>
               ))}
             </div>
 
             <div className="flex flex-col xl:flex-row gap-3 xl:items-center xl:justify-between">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(['all', 'sales', 'purchases'] as StatementFilter[]).map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setStatementFilter(filter)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${statementFilter === filter ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     value={statementSearch}
                     onChange={(event) => setStatementSearch(event.target.value)}
-                    placeholder="Search ID, customer or supplier"
+                    placeholder={activeTab === 'sales' ? 'Search order or customer' : 'Search bill or supplier'}
                     className="w-full sm:w-64 pl-9 pr-3 py-2 bg-slate-50 text-xs rounded-lg border border-slate-200 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
@@ -1136,6 +1303,21 @@ export const Finance: React.FC<FinanceProps> = ({
                   title={t('Print statement')}
                 >
                   <Printer className="w-3.5 h-3.5" /> {t('Print')}
+                </button>
+                <button
+                  onClick={() => exportRowsToCsv(activeTab === 'sales' ? 'sales-orders.csv' : 'purchase-bills.csv', filteredStatementRows.map((row) => ({
+                    type: row.type,
+                    reference: row.id,
+                    date: row.date,
+                    party: row.party,
+                    total: row.total,
+                    paid: row.paid,
+                    outstanding: row.outstanding,
+                    status: row.status
+                  })))}
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Export CSV
                 </button>
                 <button
                   onClick={loadFinanceData}
@@ -1189,7 +1371,7 @@ export const Finance: React.FC<FinanceProps> = ({
               </table>
             </div>
           </div>
-        ) : activeTab === 'reminders' ? (
+        ) : activeTab === 'sales' && salesView === 'reminders' ? (
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {([
@@ -1202,11 +1384,80 @@ export const Finance: React.FC<FinanceProps> = ({
                   <div className={`text-lg font-bold mt-1 ${textColor}`}>{reminders.filter((reminder) => {
                     const dueDate = reminder.dueDate;
                     return dueDate && (status === 'overdue' ? dueDate < todayKey : status === 'due_today' ? dueDate === todayKey : dueDate > todayKey);
-                  }).length}</div>
+                  }).length + allCustomerReminderRows.filter((row) =>
+                    row.reminder.status === 'active' &&
+                    (status === 'overdue' ? row.status === 'overdue' : status === 'due_today' ? row.status === 'due_today' : row.status === 'upcoming')
+                  ).length}</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">Open reminders</div>
                 </button>
               ))}
             </div>
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 p-4">
+                <h2 className="font-semibold text-slate-900">Customer Payment Reminders</h2>
+                <p className="mt-1 text-xs text-slate-500">Scheduled reminders linked to each customer’s current outstanding balance.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[850px] text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <th className="px-4 py-3">Customer</th>
+                      <th className="px-4 py-3 text-right">Pending amount</th>
+                      <th className="px-4 py-3">Due date</th>
+                      <th className="px-4 py-3">Frequency</th>
+                      <th className="px-4 py-3">Payment status</th>
+                      <th className="px-4 py-3">Reminder status</th>
+                      <th className="px-4 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                    {customerReminderRows.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No customer payment reminders match the selected filters.</td></tr>
+                    ) : customerReminderRows.map(({ customer, reminder, outstanding, paymentStatus, status }) => (
+                      <tr key={customer.id} className="hover:bg-slate-50/60">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900">{customer.company || customer.name}</div>
+                          <div className="text-slate-500">{customer.name}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-rose-600">{formatCurrency(outstanding)}</td>
+                        <td className="whitespace-nowrap px-4 py-3">{reminder.dueDate}</td>
+                        <td className="whitespace-nowrap px-4 py-3 capitalize">{reminder.frequency.replace('_', ' ')}</td>
+                        <td className="px-4 py-3"><Badge status={paymentStatus} /></td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                            status === 'completed' ? 'bg-emerald-50 text-emerald-700' :
+                            status === 'overdue' ? 'bg-rose-50 text-rose-700' :
+                            status === 'due_today' ? 'bg-amber-50 text-amber-700' :
+                            'bg-blue-50 text-blue-700'
+                          }`}>
+                            {status === 'completed' ? 'Completed' : status === 'due_today' ? 'Due today' : status === 'overdue' ? 'Overdue' : 'Upcoming'}
+                          </span>
+                          {reminder.lastCompletedAt && <div className="mt-1 text-[10px] text-slate-400">Last completed</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            {reminder.status !== 'completed' && can('finance', 'edit') && (
+                              <button
+                                onClick={() => handleCustomerReminderComplete(customer)}
+                                className="min-h-10 rounded-lg bg-emerald-50 px-3 font-semibold text-emerald-700 hover:bg-emerald-100"
+                              >
+                                {reminder.frequency === 'one_time' ? 'Complete' : 'Complete & schedule next'}
+                              </button>
+                            )}
+                            {can('finance', 'edit') && <button
+                              onClick={() => openCustomerReminderEditor(customer)}
+                              className="min-h-10 rounded-lg bg-blue-50 px-3 font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              Reschedule
+                            </button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
               <div>
                 <label className="form-label">Due date</label>
@@ -1216,6 +1467,7 @@ export const Finance: React.FC<FinanceProps> = ({
                   <option value="due_today">Due today</option>
                   <option value="overdue">Overdue</option>
                   <option value="not_set">Not set</option>
+                  <option value="completed">Completed</option>
                 </select>
               </div>
               <div>
@@ -1226,7 +1478,9 @@ export const Finance: React.FC<FinanceProps> = ({
                 <label className="form-label">Customer</label>
                 <select value={reminderCustomerFilter} onChange={(event) => setReminderCustomerFilter(event.target.value)} className="form-select">
                   <option value="all">All customers</option>
-                  {customers.filter((customer) => reminders.some((reminder) => reminder.customerId === customer.id)).map((customer) => (
+                  {customers.filter((customer) =>
+                    customer.paymentReminder || reminders.some((reminder) => reminder.customerId === customer.id)
+                  ).map((customer) => (
                     <option key={customer.id} value={customer.id}>{customer.company || customer.name}</option>
                   ))}
                 </select>
@@ -1272,9 +1526,9 @@ export const Finance: React.FC<FinanceProps> = ({
                       <td className="py-3 px-4"><Badge status={order.paymentStatus} /></td>
                       <td className="py-3 px-4 text-slate-500">{reminder.followUpDate || '—'}</td>
                       <td className="py-3 px-4 text-right">
-                        <button onClick={() => openReminderEditor(reminder)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
+                        {can('finance', 'edit') && <button onClick={() => openReminderEditor(reminder)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
                           <CalendarDays className="w-3.5 h-3.5" /> Manage
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   ))}
@@ -1282,42 +1536,86 @@ export const Finance: React.FC<FinanceProps> = ({
               </table>
             </div>
           </div>
-        ) : activeTab === 'collections' ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 border-y border-slate-200/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Customer Name</th>
-                  <th className="py-3 px-4">Amount Received</th>
-                  <th className="py-3 px-4">Payment Method</th>
-                  <th className="py-3 px-4">Date</th>
-                  <th className="py-3 px-4">Reference Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                {payments.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400">
-                      No customer payment records found.
-                    </td>
-                  </tr>
-                ) : (
-                  payments.map((pymt) => (
-                    <tr key={pymt.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="py-3 px-4 font-medium text-slate-900">{pymt.customerName}</td>
-                      <td className="py-3 px-4 font-semibold text-emerald-700">
-                        ₹{pymt.amount.toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 capitalize text-slate-600">{pymt.paymentMethod.replace('_', ' ')}</td>
-                      <td className="py-3 px-4 text-slate-500">{pymt.paymentDate}</td>
-                      <td className="py-3 px-4 text-slate-500">{pymt.notes || '—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        ) : activeTab === 'sales' && salesView === 'payments' ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={paymentSearch} onChange={(event) => setPaymentSearch(event.target.value)} placeholder="Search customer, order or receipt" className="min-h-10 min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 text-xs" />
+              <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as DateFilter)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs">
+                <option value="all">All dates</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom range</option>
+              </select>
+              <button onClick={() => window.print()} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white"><Printer className="h-3.5 w-3.5" />Print</button>
+              <button onClick={() => exportRowsToCsv('customer-payments.csv', filteredPayments.map((payment) => ({ receipt: payment.receiptNumber, customer: payment.customerName, order: payment.orderNumber, amount: payment.amount, method: payment.paymentMethod, date: payment.paymentDate, notes: payment.notes || '' })))} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700">Export CSV</button>
+            </div>
+            {dateFilter === 'custom' && <div className="flex flex-wrap gap-3 text-xs text-slate-500"><label>From <input type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label><label>To <input type="date" value={customEndDate} onChange={(event) => setCustomEndDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label></div>}
+            <div className="text-xs font-semibold text-slate-600">Collected in this period: {formatCurrency(filteredPayments.reduce((sum, payment) => sum + payment.amount, 0))}</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead><tr className="bg-slate-50/80 border-y border-slate-200/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider"><th className="py-3 px-4">Receipt</th><th className="py-3 px-4">Customer</th><th className="py-3 px-4">Order</th><th className="py-3 px-4">Amount</th><th className="py-3 px-4">Method</th><th className="py-3 px-4">Date</th><th className="py-3 px-4">Notes</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {filteredPayments.length === 0 ? <tr><td colSpan={7} className="py-12 text-center text-slate-400">No customer payments match these filters.</td></tr> : filteredPayments.map((payment) => (
+                    <tr key={payment.id}><td className="py-3 px-4 font-mono">{payment.receiptNumber}</td><td className="py-3 px-4 font-semibold text-slate-900">{payment.customerName}</td><td className="py-3 px-4">{payment.orderNumber}</td><td className="py-3 px-4 font-semibold text-emerald-700">{formatCurrency(payment.amount)}</td><td className="py-3 px-4 capitalize">{payment.paymentMethod.replace('_', ' ')}</td><td className="py-3 px-4">{payment.paymentDate}</td><td className="py-3 px-4">{payment.notes || '—'}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        ) : (
+        ) : activeTab === 'purchase' && purchaseView === 'payments' ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={purchasePaymentSearch} onChange={(event) => setPurchasePaymentSearch(event.target.value)} placeholder="Search supplier or purchase bill" className="min-h-10 min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 text-xs" />
+              <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as DateFilter)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs">
+                <option value="all">All dates</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom range</option>
+              </select>
+              <button onClick={() => window.print()} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white"><Printer className="h-3.5 w-3.5" />Print</button>
+              <button onClick={() => exportRowsToCsv('supplier-payments.csv', filteredSupplierPayments.map((payment) => ({ bill: payment.purchaseNumber, supplier: payment.supplierName, amount: payment.amount, method: payment.paymentMethod, date: payment.paymentDate, notes: payment.notes })))} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700">Export CSV</button>
+            </div>
+            {dateFilter === 'custom' && <div className="flex flex-wrap gap-3 text-xs text-slate-500"><label>From <input type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label><label>To <input type="date" value={customEndDate} onChange={(event) => setCustomEndDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label></div>}
+            <div className="text-xs font-semibold text-slate-600">Supplier payments in this period: {formatCurrency(filteredSupplierPayments.reduce((sum, payment) => sum + payment.amount, 0))}</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead><tr className="bg-slate-50/80 border-y border-slate-200/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider"><th className="py-3 px-4">Purchase bill</th><th className="py-3 px-4">Supplier</th><th className="py-3 px-4">Amount</th><th className="py-3 px-4">Method</th><th className="py-3 px-4">Date</th><th className="py-3 px-4">Notes</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {filteredSupplierPayments.length === 0 ? <tr><td colSpan={6} className="py-12 text-center text-slate-400">No supplier payments match these filters.</td></tr> : filteredSupplierPayments.map((payment) => (
+                    <tr key={`${payment.purchaseNumber}-${payment.id}`}><td className="py-3 px-4 font-semibold"><Link to={`/purchases/${payment.purchaseId}`} className="text-blue-600 hover:underline">{payment.purchaseNumber}</Link></td><td className="py-3 px-4 text-slate-900">{payment.supplierName}</td><td className="py-3 px-4 font-semibold text-emerald-700">{formatCurrency(payment.amount)}</td><td className="py-3 px-4 capitalize">{payment.paymentMethod.replace('_', ' ')}</td><td className="py-3 px-4">{payment.paymentDate}</td><td className="py-3 px-4">{payment.notes || '—'}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : activeTab === 'dispatch' ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={dispatchSearch} onChange={(event) => setDispatchSearch(event.target.value)} placeholder="Search challan, order, customer or vehicle" className="min-h-10 min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 text-xs" />
+              <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as DateFilter)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs">
+                <option value="all">All dates</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom range</option>
+              </select>
+              <button onClick={() => window.print()} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white"><Printer className="h-3.5 w-3.5" />Print</button>
+              <button onClick={() => exportRowsToCsv('delivery-challans.csv', filteredDispatches.map((dispatch) => ({ challan: dispatch.dispatchNumber, order: dispatch.orderNumber, customer: dispatch.customerName, date: dispatch.dispatchDate, status: dispatch.status, vehicle: dispatch.vehicleNumber || '', driver: dispatch.driverName || '', quantity: dispatch.items.reduce((sum, item) => sum + item.quantity, 0) })))} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700">Export CSV</button>
+            </div>
+            {dateFilter === 'custom' && <div className="flex flex-wrap gap-3 text-xs text-slate-500"><label>From <input type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label><label>To <input type="date" value={customEndDate} onChange={(event) => setCustomEndDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label></div>}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead><tr className="bg-slate-50/80 border-y border-slate-200/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider"><th className="py-3 px-4">Challan</th><th className="py-3 px-4">Order</th><th className="py-3 px-4">Customer</th><th className="py-3 px-4">Date</th><th className="py-3 px-4">Items / Qty</th><th className="py-3 px-4">Vehicle / Driver</th><th className="py-3 px-4">Status</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {filteredDispatches.length === 0 ? <tr><td colSpan={7} className="py-12 text-center text-slate-400">No delivery challans match these filters.</td></tr> : filteredDispatches.map((dispatch) => (
+                    <tr key={dispatch.id}><td className="py-3 px-4 font-semibold text-indigo-700">{dispatch.dispatchNumber}</td><td className="py-3 px-4">{dispatch.orderNumber}</td><td className="py-3 px-4 font-semibold text-slate-900">{dispatch.customerName}</td><td className="py-3 px-4 whitespace-nowrap">{dispatch.dispatchDate}</td><td className="py-3 px-4">{dispatch.items.length} / {dispatch.items.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()}</td><td className="py-3 px-4">{dispatch.vehicleNumber || '—'}{dispatch.driverName ? ` / ${dispatch.driverName}` : ''}</td><td className="py-3 px-4"><Badge status={dispatch.status} /></td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : activeTab === 'expenses' ? (
+          <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={expenseSearch} onChange={(event) => setExpenseSearch(event.target.value)} placeholder="Search voucher, category or description" className="min-h-10 min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 text-xs" />
+            <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value as DateFilter)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs">
+              <option value="all">All dates</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom range</option>
+            </select>
+            <button onClick={() => window.print()} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white"><Printer className="h-3.5 w-3.5" />Print</button>
+            <button onClick={() => exportRowsToCsv('expenses.csv', filteredExpenses.map((expense) => ({ voucher: expense.id, category: expense.category, description: expense.description, amount: expense.amount, method: expense.paymentMethod, date: expense.expenseDate, status: expense.status })))} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700">Export CSV</button>
+          </div>
+          {dateFilter === 'custom' && <div className="flex flex-wrap gap-3 text-xs text-slate-500"><label>From <input type="date" value={customStartDate} onChange={(event) => setCustomStartDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label><label>To <input type="date" value={customEndDate} onChange={(event) => setCustomEndDate(event.target.value)} className="ml-1 rounded border border-slate-200 px-2 py-1.5" /></label></div>}
+          <div className="text-xs font-semibold text-slate-600">Expenses in this period: {formatCurrency(filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0))}</div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -1333,14 +1631,14 @@ export const Finance: React.FC<FinanceProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                {expenses.length === 0 ? (
+                {filteredExpenses.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-12 text-center text-slate-400">
                       No expense vouchers recorded yet.
                     </td>
                   </tr>
                 ) : (
-                  expenses.map((exp) => (
+                  filteredExpenses.map((exp) => (
                     <tr key={exp.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3 px-4 font-mono font-semibold text-rose-600">{exp.id}</td>
                       <td className="py-3 px-4 capitalize text-slate-700 font-medium">{exp.category.replace('_', ' ')}</td>
@@ -1352,14 +1650,14 @@ export const Finance: React.FC<FinanceProps> = ({
                         <Badge status={exp.status} />
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <button
+                        {can('finance', 'delete') && <button
                           onClick={() => setExpenseToDelete(exp)}
                           title="Delete expense record"
                           className="inline-flex items-center justify-center p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
                           aria-label={`Delete expense ${exp.id}`}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   ))
@@ -1367,7 +1665,8 @@ export const Finance: React.FC<FinanceProps> = ({
               </tbody>
             </table>
           </div>
-        )}
+          </div>
+        ) : null}
       </div>
 
       {/* Delete Confirmation Modal */}
@@ -1410,7 +1709,7 @@ export const Finance: React.FC<FinanceProps> = ({
               >
                 Cancel
               </button>
-              <button
+              {can('finance', 'delete') && <button
                 type="button"
                 disabled={isDeleting}
                 onClick={handleDeleteConfirm}
@@ -1424,7 +1723,7 @@ export const Finance: React.FC<FinanceProps> = ({
                 ) : (
                   <span>Delete Expense</span>
                 )}
-              </button>
+              </button>}
             </div>
           </div>
         </div>
@@ -1468,8 +1767,54 @@ export const Finance: React.FC<FinanceProps> = ({
         </form>
       </Modal>
 
+      <Modal
+        isOpen={Boolean(editingCustomerReminder)}
+        onClose={() => setEditingCustomerReminder(null)}
+        title="Reschedule Customer Payment Reminder"
+        subtitle="Update the reminder schedule; no message is sent automatically."
+        maxWidth="md"
+      >
+        <form onSubmit={handleCustomerReminderSave} className="space-y-4">
+          {reminderError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">{reminderError}</div>}
+          {editingCustomerReminder && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-900">
+              {editingCustomerReminder.company || editingCustomerReminder.name}
+            </div>
+          )}
+          <div>
+            <label className="form-label">Reminder due date</label>
+            <input
+              type="date"
+              required
+              value={customerReminderDate}
+              onChange={(event) => setCustomerReminderDate(event.target.value)}
+              className="form-input"
+            />
+          </div>
+          <div>
+            <label className="form-label">Reminder frequency</label>
+            <select
+              value={customerReminderFrequency}
+              onChange={(event) => setCustomerReminderFrequency(event.target.value as PaymentReminderFrequency)}
+              className="form-select"
+            >
+              <option value="one_time">One-time</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+            <button type="button" onClick={() => setEditingCustomerReminder(null)} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={reminderSaving} className="btn-primary !bg-blue-600 hover:!bg-blue-700 disabled:opacity-50">
+              {reminderSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {reminderSaving ? 'Saving...' : 'Save schedule'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Printable Company Day-to-Day Ledger */}
-      <div id="angel-print-ledger" className="hidden">
+      <div className="hidden">
         <div className="p-8 text-slate-900 bg-white font-sans">
           {/* Header with Company details */}
           <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4 mb-4">

@@ -26,9 +26,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [type, setType] = useState<ProductType>(defaultType);
   const [sizeOrType, setSizeOrType] = useState('');
   const [description, setDescription] = useState('');
-  const [priceA, setPriceA] = useState<number>(10);
-  const [priceB, setPriceB] = useState<number>(9);
-  const [priceC, setPriceC] = useState<number>(8);
+  const [priceA, setPriceA] = useState('');
+  const [priceB, setPriceB] = useState('');
+  const [priceC, setPriceC] = useState('');
   const [currentStock, setCurrentStock] = useState<number>(1000);
   const [minimumStock, setMinimumStock] = useState<number>(500);
   const [unit, setUnit] = useState('pcs');
@@ -57,9 +57,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         setType(initialProduct.type || defaultType);
         setSizeOrType(initialProduct.sizeOrType || '');
         setDescription(initialProduct.description || '');
-        setPriceA(initialProduct.priceA || 0);
-        setPriceB(initialProduct.priceB || 0);
-        setPriceC(initialProduct.priceC || 0);
+        setPriceA(String(initialProduct.priceA ?? ''));
+        setPriceB(String(initialProduct.priceB ?? ''));
+        setPriceC(String(initialProduct.priceC ?? ''));
         setCurrentStock(initialProduct.currentStock || 0);
         setMinimumStock(initialProduct.minimumStock || 0);
         setUnit(initialProduct.unit || 'pcs');
@@ -100,9 +100,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         setType(defaultType);
         setSizeOrType('');
         setDescription('');
-        setPriceA(10);
-        setPriceB(9);
-        setPriceC(8);
+        setPriceA('');
+        setPriceB('');
+        setPriceC('');
         setCurrentStock(1000);
         setMinimumStock(500);
         setUnit('pcs');
@@ -139,7 +139,13 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       setError('Product name is required.');
       return;
     }
-    if ([priceA, priceB, priceC, currentStock, minimumStock].some((value) => !Number.isFinite(value) || value < 0)) {
+    const parsedPriceA = Number(priceA);
+    const parsedPriceB = Number(priceB);
+    const parsedPriceC = Number(priceC);
+    if (
+      [priceA, priceB, priceC].some((value) => value.trim() === '') ||
+      [parsedPriceA, parsedPriceB, parsedPriceC, currentStock, minimumStock].some((value) => !Number.isFinite(value) || value < 0)
+    ) {
       setError('Prices and stock values must be valid non-negative numbers.');
       return;
     }
@@ -196,9 +202,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           type,
           sizeOrType: sizeOrType.trim() || name.trim(),
           description: description.trim(),
-          priceA: Number(priceA),
-          priceB: Number(priceB),
-          priceC: Number(priceC),
+          priceA: parsedPriceA,
+          priceB: parsedPriceB,
+          priceC: parsedPriceC,
           currentStock: Number(currentStock),
           minimumStock: Number(minimumStock),
           unit,
@@ -230,9 +236,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           type,
           sizeOrType: sizeOrType.trim() || name.trim(),
           description: description.trim(),
-          priceA: Number(priceA),
-          priceB: Number(priceB),
-          priceC: Number(priceC),
+          priceA: parsedPriceA,
+          priceB: parsedPriceB,
+          priceC: parsedPriceC,
           currentStock: Number(currentStock),
           minimumStock: Number(minimumStock),
           unit,
@@ -376,7 +382,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 step="0.01"
                 required
                 value={priceA}
-                onChange={(e) => setPriceA(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setPriceA(e.target.value)}
                 className="form-input bg-white"
               />
             </div>
@@ -387,7 +393,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 step="0.01"
                 required
                 value={priceB}
-                onChange={(e) => setPriceB(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setPriceB(e.target.value)}
                 className="form-input bg-white"
               />
             </div>
@@ -398,7 +404,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 step="0.01"
                 required
                 value={priceC}
-                onChange={(e) => setPriceC(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setPriceC(e.target.value)}
                 className="form-input bg-white"
               />
             </div>

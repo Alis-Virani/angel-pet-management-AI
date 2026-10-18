@@ -11,6 +11,7 @@ import {
   History
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 
 interface RawMaterialsProps {
   onOpenAddRawMaterialModal?: (material?: RawMaterial) => void;
@@ -21,6 +22,7 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
   onOpenNewPurchaseModal
 }) => {
   const { t, confirm } = useTranslation();
+  const { can } = useAuth();
   const [materials, setMaterials] = useState<RawMaterial[]>([]);
   const [usageLogs, setUsageLogs] = useState<RawMaterialUsage[]>([]);
   const [purchases, setPurchases] = useState<PurchaseOrder[]>([]);
@@ -81,7 +83,7 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {onOpenNewPurchaseModal && (
+          {onOpenNewPurchaseModal && can('purchases', 'create') && (
             <button
               onClick={onOpenNewPurchaseModal}
               className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center space-x-1.5"
@@ -177,13 +179,13 @@ export const RawMaterials: React.FC<RawMaterialsProps> = ({
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end space-x-1">
-                        <button
+                        {can('rawMaterials', 'delete') && <button
                           onClick={() => handleDelete(m.id)}
                           className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
                           title={t('Delete Raw Material')}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>

@@ -5,7 +5,6 @@ import {
   Bell,
   Plus,
   User,
-  Database,
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
@@ -17,8 +16,8 @@ import {
   IndianRupee,
   Menu
 } from 'lucide-react';
-import { seedDatabase } from '../../services/db';
 import { useTranslation } from '../../i18n';
+import { useAuth } from '../../auth/AuthContext';
 
 interface HeaderProps {
   collapsed: boolean;
@@ -44,27 +43,18 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewPurchaseModal
 }) => {
   const { language, setLanguage, t } = useTranslation();
+  const { can, isAdmin, profile, user, signOutUser } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
-  const [resetMessage, setResetMessage] = useState('');
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
       navigate(`/sales?search=${encodeURIComponent(searchQuery.trim())}`);
     }
-  };
-
-  const handleResetData = async () => {
-    await seedDatabase(true);
-    setResetMessage(t('Database reset to reference demo data!'));
-    setTimeout(() => {
-      setResetMessage('');
-      window.location.reload();
-    }, 800);
   };
 
   return (
@@ -85,7 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Search Input Form */}
-        <form onSubmit={handleSearchSubmit} className="relative w-full max-w-[200px] sm:max-w-xs md:max-w-sm">
+        {can('salesOrders', 'view') && <form onSubmit={handleSearchSubmit} className="relative w-full max-w-[200px] sm:max-w-xs md:max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
@@ -94,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 sm:py-2 bg-slate-100 hover:bg-slate-100/80 focus:bg-white text-xs font-medium text-slate-800 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
-        </form>
+        </form>}
       </div>
 
       {/* Actions & User Controls */}
@@ -131,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                 {t('Quick Actions')}
               </div>
-              <button
+              {can('salesOrders', 'create') && can('salesOrders', 'view') && can('customers', 'view') && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenNewOrderModal ? onOpenNewOrderModal() : navigate('/sales');
@@ -140,8 +130,8 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <ShoppingCart className="w-4 h-4 text-blue-600" />
                 <span>{t('New Sales Order')}</span>
-              </button>
-              <button
+              </button>}
+              {can('purchases', 'create') && (can('purchases', 'view') || can('rawMaterials', 'view')) && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenNewPurchaseModal ? onOpenNewPurchaseModal() : navigate('/purchases');
@@ -150,8 +140,8 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <ShoppingBag className="w-4 h-4 text-indigo-600" />
                 <span>{t('New Purchase Entry')}</span>
-              </button>
-              <button
+              </button>}
+              {can('customers', 'create') && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenAddCustomerModal ? onOpenAddCustomerModal() : navigate('/customers');
@@ -160,8 +150,8 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <User className="w-4 h-4 text-emerald-600" />
                 <span>{t('Add Customer')}</span>
-              </button>
-              <button
+              </button>}
+              {can('finishedGoods', 'create') && can('finishedGoods', 'view') && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenAddFinishedGoodsModal ? onOpenAddFinishedGoodsModal() : navigate('/finished-goods');
@@ -170,8 +160,8 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Boxes className="w-4 h-4 text-purple-600" />
                 <span>{t('Add Finished Goods Stock')}</span>
-              </button>
-              <button
+              </button>}
+              {can('finance', 'create') && can('finance', 'view') && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenRecordPaymentModal ? onOpenRecordPaymentModal() : navigate('/finance');
@@ -180,8 +170,8 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <IndianRupee className="w-4 h-4 text-amber-600" />
                 <span>{t('Record Payment')}</span>
-              </button>
-              <button
+              </button>}
+              {can('dispatch', 'create') && can('dispatch', 'view') && <button
                 onClick={() => {
                   setShowQuickActions(false);
                   onOpenNewDispatchModal ? onOpenNewDispatchModal() : navigate('/dispatch');
@@ -190,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Truck className="w-4 h-4 text-sky-600" />
                 <span>{t('New Dispatch')}</span>
-              </button>
+              </button>}
             </div>
           )}
         </div>
@@ -248,11 +238,11 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center space-x-2 pl-2 pr-3 py-1 rounded-xl hover:bg-slate-100 transition-colors"
           >
             <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs">
-              AD
+              {(profile?.displayName || user?.email || 'E').slice(0, 2).toUpperCase()}
             </div>
             <div className="hidden md:flex flex-col text-left">
-              <span className="text-xs font-semibold text-slate-800">Admin</span>
-              <span className="text-[10px] text-slate-500">Angel Pet</span>
+              <span className="text-xs font-semibold text-slate-800">{profile?.displayName || 'Owner'}</span>
+              <span className="text-[10px] text-slate-500">{user?.email}</span>
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
           </button>
@@ -260,10 +250,10 @@ export const Header: React.FC<HeaderProps> = ({
           {showUserMenu && (
             <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50">
               <div className="px-4 py-2 border-b border-slate-100">
-                <p className="font-semibold text-xs text-slate-800">Admin Owner</p>
-                <p className="text-[11px] text-slate-500">admin@angelpet.com</p>
+                <p className="font-semibold text-xs text-slate-800">{profile?.displayName || 'Owner'}</p>
+                <p className="text-[11px] text-slate-500">{user?.email}</p>
               </div>
-              <button
+              {isAdmin && <button
                 onClick={() => {
                   setShowUserMenu(false);
                   navigate('/settings');
@@ -272,24 +262,21 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Layers className="w-4 h-4 text-slate-500" />
                 <span>Company Settings</span>
-              </button>
+              </button>}
               <button
-                onClick={handleResetData}
-                className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-amber-700 flex items-center space-x-2 font-medium"
+                onClick={() => {
+                  setShowUserMenu(false);
+                  void signOutUser();
+                }}
+                className="w-full text-left px-4 py-2 hover:bg-slate-50 text-xs text-slate-700 font-medium"
               >
-                <Database className="w-4 h-4 text-amber-500" />
-                <span>Reset Demo Seed Data</span>
+                Sign out
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {resetMessage && (
-        <div className="absolute top-18 right-6 bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-lg animate-in fade-in">
-          {resetMessage}
-        </div>
-      )}
     </header>
   );
 };

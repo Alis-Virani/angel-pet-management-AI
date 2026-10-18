@@ -9,18 +9,68 @@ import {
   , deleteField
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage, isLiveFirebaseConfigured, firebaseReady } from '../firebase/config';
+import { auth, db, storage, isLiveFirebaseConfigured } from '../firebase/config';
 
 // Helper to check if Firebase sync should be attempted
 const shouldSyncToFirebase = (): boolean => {
   return Boolean(isLiveFirebaseConfigured && db !== null);
 };
 
+export async function requirePermission(module: AuthorityModule, action: PermissionAction): Promise<void> {
+  const user = auth?.currentUser;
+  if (!user || !db) throw new Error('You must sign in to access company data.');
+
+  const token = await user.getIdTokenResult();
+  if (token.claims.admin === true) return;
+
+  const profileSnapshot = await getDoc(doc(getDb(), 'userProfiles', user.uid));
+  if (!profileSnapshot.exists()) throw new Error('No employee permissions are configured for this account.');
+  const profile = profileSnapshot.data();
+  if (profile.active !== true) throw new Error('This employee account has been deactivated.');
+  const allowedActions = profile.permissions?.[module];
+  if (!Array.isArray(allowedActions) || !allowedActions.includes(action)) {
+    throw new Error(`Permission denied: ${action} access to ${module}.`);
+  }
+}
+
+export async function requireAnyPermission(
+  moduleActions: Array<[AuthorityModule, PermissionAction]>
+): Promise<void> {
+  let lastError: unknown;
+  for (const [module, action] of moduleActions) {
+    try {
+      await requirePermission(module, action);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof Error) || !error.message.startsWith('Permission denied:')) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Permission denied.');
+}
+
 // Helper to safely get db instance (for TypeScript)
 const getDb = (): NonNullable<typeof db> => {
   if (!db) throw new Error('Firestore not initialized');
   return db;
 };
+
+async function getCloudItems<T extends { id: string }>(collectionName: string): Promise<T[]> {
+  if (!isLiveFirebaseConfigured || !db) {
+    throw new Error('Company data is available only through the configured Firebase project.');
+  }
+  const snapshot = await withTimeout(getDocs(collection(getDb(), collectionName)), 10000);
+  return snapshot.docs.map((item) => ({ ...item.data(), id: item.id } as T));
+}
+
+async function persistCloudWrite(operation: Promise<unknown>, description: string): Promise<void> {
+  try {
+    await withTimeout(operation, 10000);
+  } catch (error) {
+    console.error(`${description} was not confirmed by Firebase:`, error);
+    throw error;
+  }
+}
 import type {
   Customer,
   Supplier,
@@ -42,6 +92,8 @@ import type {
   PurchasePayment
   , PurchasedMaterial
   , SignedOrderCopy
+  , AuthorityModule
+  , PermissionAction
 } from '../types';
 import {
   initialCustomers,
@@ -206,6 +258,10 @@ function mergeProducts(localList: Product[], remoteList: Product[]): Product[] {
 
 // Ensure database is seeded with initial data on first load
 export async function seedDatabase(force = false): Promise<void> {
+  if (isLiveFirebaseConfigured) {
+    if (force) throw new Error('Resetting live company data with demo seed records is disabled.');
+    return;
+  }
   const isAlreadyInitialized = localStorage.getItem(STORAGE_KEYS.INITIALIZED);
 
   // Initialize the local fallback before any asynchronous Firebase work so a
@@ -226,67 +282,6 @@ export async function seedDatabase(force = false): Promise<void> {
     localStorage.setItem(STORAGE_KEYS.INITIALIZED, 'true');
   }
 
-  await firebaseReady;
-
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const customersSnap = await withTimeout(getDocs(collection(getDb(), 'customers')), 2000);
-      const isFirestoreEmpty = customersSnap.empty;
-
-      if (isFirestoreEmpty || force) {
-        console.info('Seeding Firestore with initial dataset...');
-        // Seed Customers
-        for (const item of initialCustomers) {
-          await withTimeout(setDoc(doc(getDb(), 'customers', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Products
-        for (const item of initialProducts) {
-          await withTimeout(setDoc(doc(getDb(), 'products', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Orders
-        for (const item of initialOrders) {
-          await withTimeout(setDoc(doc(getDb(), 'orders', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Dispatches
-        for (const item of initialDispatches) {
-          await withTimeout(setDoc(doc(getDb(), 'dispatches', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Payments
-        for (const item of initialPayments) {
-          await withTimeout(setDoc(doc(getDb(), 'payments', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Expenses
-        for (const item of initialExpenses) {
-          await withTimeout(setDoc(doc(getDb(), 'expenses', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Raw Materials
-        for (const item of initialRawMaterials) {
-          await withTimeout(setDoc(doc(getDb(), 'rawMaterials', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Raw Material Usage
-        for (const item of initialRawMaterialUsage) {
-          await withTimeout(setDoc(doc(getDb(), 'rawMaterialUsage', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Finished Goods Logs
-        for (const item of initialFinishedGoodsLogs) {
-          await withTimeout(setDoc(doc(getDb(), 'finishedGoodsLogs', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Documents
-        for (const item of initialDocuments) {
-          await withTimeout(setDoc(doc(getDb(), 'documents', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Purchases
-        for (const item of initialPurchases) {
-          await withTimeout(setDoc(doc(getDb(), 'purchases', item.id), item), 1500).catch(() => {});
-        }
-        // Seed Settings
-        await withTimeout(setDoc(doc(getDb(), 'settings', 'company_settings'), initialSettings), 1500).catch(() => {});
-      }
-    } catch (e) {
-      console.warn('Firebase seeding skipped or timed out, operating with LocalStorage sync:', e);
-    }
-  }
-
 }
 
 // Run seed check immediately
@@ -296,24 +291,18 @@ if (typeof localStorage !== 'undefined') {
 
 // ================= CUSTOMERS =================
 export async function getCustomers(): Promise<Customer[]> {
-  const localItems = getLocalItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, initialCustomers);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'customers')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Customer);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.CUSTOMERS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getCustomers failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requireAnyPermission([
+    ['customers', 'view'],
+    ['salesOrders', 'view'],
+    ['finance', 'view']
+  ]);
+  const items = await getCloudItems<Customer>('customers');
+  setLocalItem(STORAGE_KEYS.CUSTOMERS, items);
+  return items;
 }
 
 export async function addCustomer(data: Omit<Customer, 'id' | 'createdAt' | 'totalOrders' | 'totalSpent'> & { id?: string }): Promise<Customer> {
+  await requirePermission('customers', 'create');
   const customerId = data.id || `CUS-${Date.now().toString().slice(-4)}`;
   const newCustomer: Customer = {
     ...data,
@@ -337,15 +326,21 @@ export async function addCustomer(data: Omit<Customer, 'id' | 'createdAt' | 'tot
 
   // Sync with Firestore asynchronously
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'customers', newCustomer.id), newCustomer), 2500).catch((e) =>
-      console.error('Error adding customer to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'customers', newCustomer.id), sanitizeForFirestore(newCustomer)), 'Adding customer');
   }
 
   return newCustomer;
 }
 
 export async function updateCustomer(id: string, updates: Partial<Customer>): Promise<Customer> {
+  const updateKeys = Object.keys(updates);
+  if (updateKeys.length === 1 && updateKeys[0] === 'paymentReminder') {
+    await requireAnyPermission([['customers', 'edit'], ['finance', 'edit']]);
+  } else if (updateKeys.length > 0 && updateKeys.every((key) => key === 'totalOrders' || key === 'totalSpent')) {
+    await requireAnyPermission([['customers', 'edit'], ['salesOrders', 'create']]);
+  } else {
+    await requirePermission('customers', 'edit');
+  }
   let updated: Customer | null = null;
   const list = getLocalItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, initialCustomers);
   let found = false;
@@ -377,29 +372,36 @@ export async function updateCustomer(id: string, updates: Partial<Customer>): Pr
   setLocalItem(STORAGE_KEYS.CUSTOMERS, newList);
 
   if (shouldSyncToFirebase() && updated) {
-    withTimeout(setDoc(doc(getDb(), 'customers', id), updated, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating customer in Firebase:', e)
-    );
+    const firebaseUpdates = sanitizeForFirestore(updated) as Record<string, unknown>;
+    if (updates.paymentReminder === undefined && Object.prototype.hasOwnProperty.call(updates, 'paymentReminder')) {
+      firebaseUpdates.paymentReminder = deleteField();
+    }
+    await persistCloudWrite(setDoc(doc(getDb(), 'customers', id), firebaseUpdates, { merge: true }), 'Updating customer');
   }
 
   return updated!;
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
+  await requirePermission('customers', 'delete');
   const list = getLocalItem<Customer[]>(STORAGE_KEYS.CUSTOMERS, initialCustomers);
   setLocalItem(STORAGE_KEYS.CUSTOMERS, list.filter((item) => item.id !== id));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'customers', id)), 2500).catch((e) =>
-      console.error('Error deleting customer in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'customers', id)), 'Deleting customer');
   }
 }
 
 // ================= SUPPLIERS =================
 export async function getSuppliers(): Promise<Supplier[]> {
-  const purchases = await getPurchases();
-  const saved = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
+  await requirePermission('suppliers', 'view');
+  const saved = await getCloudItems<Supplier>('suppliers');
+  let purchases: PurchaseOrder[] = [];
+  try {
+    purchases = await getPurchases();
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('Permission denied:')) throw error;
+  }
   const byCompany = new Map(saved.map((supplier) => [supplier.company.toLowerCase(), supplier]));
   const suppliers = new Map<string, Supplier>();
 
@@ -435,6 +437,7 @@ export async function getSuppliers(): Promise<Supplier[]> {
 }
 
 export async function addSupplier(data: Omit<Supplier, 'id' | 'createdAt' | 'totalPurchases' | 'totalPaid' | 'totalOutstanding'>): Promise<Supplier> {
+  await requirePermission('suppliers', 'create');
   const supplier: Supplier = {
     ...data,
     id: `SUP-${Date.now().toString().slice(-8)}`,
@@ -446,75 +449,49 @@ export async function addSupplier(data: Omit<Supplier, 'id' | 'createdAt' | 'tot
   const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
   setLocalItem(STORAGE_KEYS.SUPPLIERS, [supplier, ...list]);
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'suppliers', supplier.id), supplier), 2500).catch((e) =>
-      console.error('Error adding supplier to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'suppliers', supplier.id), supplier), 'Adding supplier');
   }
   return supplier;
 }
 
 export async function updateSupplier(id: string, updates: Partial<Supplier>): Promise<Supplier> {
+  await requirePermission('suppliers', 'edit');
   const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
   const current = list.find((supplier) => supplier.id === id);
   if (!current) throw new Error('Supplier not found.');
   const updated = { ...current, ...updates };
   setLocalItem(STORAGE_KEYS.SUPPLIERS, list.map((supplier) => supplier.id === id ? updated : supplier));
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'suppliers', id), updated, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating supplier in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'suppliers', id), updated, { merge: true }), 'Updating supplier');
   }
   return updated;
 }
 
 export async function deleteSupplier(id: string): Promise<void> {
+  await requirePermission('suppliers', 'delete');
   const list = getLocalItem<Supplier[]>(STORAGE_KEYS.SUPPLIERS, []);
   setLocalItem(STORAGE_KEYS.SUPPLIERS, list.filter((supplier) => supplier.id !== id));
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'suppliers', id)), 2500).catch((e) =>
-      console.error('Error deleting supplier in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'suppliers', id)), 'Deleting supplier');
   }
 }
 
 // ================= PRODUCTS =================
 export async function getProducts(): Promise<Product[]> {
-  const localItems = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, initialProducts);
-
-  const mergedWithInitial: Product[] = [];
-  const processedIds = new Set<string>();
-
-  for (const item of localItems) {
-    processedIds.add(item.id);
-    mergedWithInitial.push(item);
-  }
-
-  for (const init of initialProducts) {
-    if (!processedIds.has(init.id)) {
-      mergedWithInitial.push(init);
-      processedIds.add(init.id);
-    }
-  }
-
-  setLocalItem(STORAGE_KEYS.PRODUCTS, mergedWithInitial);
-
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'products')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Product);
-        const merged = mergeProducts(mergedWithInitial, remoteItems);
-        setLocalItem(STORAGE_KEYS.PRODUCTS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getProducts failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return mergedWithInitial;
+  await requireAnyPermission([
+    ['productDirectory', 'view'],
+    ['salesOrders', 'view'],
+    ['finishedGoods', 'view'],
+    ['dispatch', 'view'],
+    ['dashboard', 'view']
+  ]);
+  const items = await getCloudItems<Product>('products');
+  setLocalItem(STORAGE_KEYS.PRODUCTS, items);
+  return items;
 }
 
 export async function addProduct(data: Omit<Product, 'id' | 'createdAt'>): Promise<Product> {
+  await requirePermission('productDirectory', 'create');
   const prefix = data.type === 'bottle' ? 'PRD-1' : 'PRD-2';
   const newProduct: Product = {
     ...data,
@@ -526,15 +503,23 @@ export async function addProduct(data: Omit<Product, 'id' | 'createdAt'>): Promi
   setLocalItem(STORAGE_KEYS.PRODUCTS, [newProduct, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'products', newProduct.id), newProduct), 2500).catch((e) =>
-      console.error('Error adding product to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'products', newProduct.id), newProduct), 'Adding product');
   }
 
   return newProduct;
 }
 
 export async function updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
+  const updateKeys = Object.keys(updates);
+  if (updateKeys.length === 1 && updateKeys[0] === 'currentStock') {
+    await requireAnyPermission([
+      ['productDirectory', 'edit'],
+      ['finishedGoods', 'create'],
+      ['dispatch', 'create']
+    ]);
+  } else {
+    await requirePermission('productDirectory', 'edit');
+  }
   let updated: Product | null = null;
   const list = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, initialProducts);
   let found = false;
@@ -563,12 +548,7 @@ export async function updateProduct(id: string, updates: Partial<Product>): Prom
     if (shouldClearUnitsPerPacket) {
       firebaseUpdates.unitsPerPacket = deleteField();
     }
-    withTimeout(setDoc(doc(getDb(), 'products', id), firebaseUpdates, { merge: true }), 2500).catch((error) => {
-      console.error('Error updating product in Firebase:', {
-        productId: id,
-        error
-      });
-    });
+    await persistCloudWrite(setDoc(doc(getDb(), 'products', id), firebaseUpdates, { merge: true }), `Updating product ${id}`);
   }
 
   if (!updated) throw new Error('Product not found');
@@ -576,41 +556,38 @@ export async function updateProduct(id: string, updates: Partial<Product>): Prom
 }
 
 export async function deleteProduct(id: string): Promise<void> {
+  await requirePermission('productDirectory', 'delete');
   const list = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, initialProducts);
   setLocalItem(STORAGE_KEYS.PRODUCTS, list.filter((item) => item.id !== id));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'products', id)), 2500).catch((e) =>
-      console.error('Error deleting product in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'products', id)), 'Deleting product');
   }
 }
 
 // ================= ORDERS =================
 export async function getOrders(): Promise<Order[]> {
-  const localItems = getLocalItem<Order[]>(STORAGE_KEYS.ORDERS, initialOrders);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'orders')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Order);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.ORDERS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getOrders failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return dedupeById(localItems);
+  await requireAnyPermission([
+    ['salesOrders', 'view'],
+    ['finance', 'view'],
+    ['dispatch', 'view'],
+    ['dashboard', 'view']
+  ]);
+  const items = dedupeById(await getCloudItems<Order>('orders'));
+  setLocalItem(STORAGE_KEYS.ORDERS, items);
+  return items;
 }
 
 export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'paidAmount' | 'paymentStatus' | 'orderStatus' | 'orderDate'>): Promise<Order> {
+  await requirePermission('salesOrders', 'create');
   const randomNum = Math.floor(10000 + Math.random() * 90000);
   const orderNumber = `ORD-${randomNum}`;
   const orderType = orderData.orderType || 'REGULAR';
   const isAS = orderType === 'AS';
   const isCashMemo = !isAS && orderData.paymentType === 'cash_memo';
+  if (isCashMemo && orderData.totalAmount > 0) {
+    await requirePermission('finance', 'create');
+  }
   const orderDate = new Date().toISOString().split('T')[0];
 
   const newOrder: Order = {
@@ -629,9 +606,7 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
   setLocalItem(STORAGE_KEYS.ORDERS, [newOrder, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'orders', newOrder.id), sanitizeForFirestore(newOrder)), 2500).catch((e) =>
-      console.error('Error adding order to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'orders', newOrder.id), sanitizeForFirestore(newOrder)), 'Adding order');
   }
 
   // Update Customer's total orders & total spent (AS Orders do not add to totalSpent)
@@ -667,9 +642,7 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
     setLocalItem(STORAGE_KEYS.PAYMENTS, [newPayment, ...paymentList]);
 
     if (shouldSyncToFirebase()) {
-      withTimeout(setDoc(doc(getDb(), 'payments', newPayment.id), sanitizeForFirestore(newPayment)), 2500).catch((e) =>
-        console.error('Error adding Cash Memo payment to Firebase:', e)
-      );
+      await persistCloudWrite(setDoc(doc(getDb(), 'payments', newPayment.id), sanitizeForFirestore(newPayment)), 'Recording cash memo payment');
     }
   }
 
@@ -677,6 +650,14 @@ export async function addOrder(orderData: Omit<Order, 'id' | 'orderNumber' | 'pa
 }
 
 export async function updateOrder(id: string, updates: Partial<Order>): Promise<Order> {
+  const updateKeys = Object.keys(updates);
+  if (updateKeys.length > 0 && updateKeys.every((key) => key === 'paidAmount' || key === 'paymentStatus')) {
+    await requireAnyPermission([['salesOrders', 'edit'], ['finance', 'create']]);
+  } else if (updateKeys.length === 1 && updateKeys[0] === 'signedCopy') {
+    await requireAnyPermission([['salesOrders', 'edit'], ['salesOrders', 'create']]);
+  } else {
+    await requirePermission('salesOrders', 'edit');
+  }
   let updated: Order | null = null;
   const list = getLocalItem<Order[]>(STORAGE_KEYS.ORDERS, initialOrders);
   let found = false;
@@ -695,9 +676,7 @@ export async function updateOrder(id: string, updates: Partial<Order>): Promise<
   setLocalItem(STORAGE_KEYS.ORDERS, newList);
 
   if (shouldSyncToFirebase() && updated) {
-    withTimeout(setDoc(doc(getDb(), 'orders', id), sanitizeForFirestore(updated), { merge: true }), 2500).catch((e) =>
-      console.error('Error updating order in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'orders', id), sanitizeForFirestore(updated), { merge: true }), `Updating order ${id}`);
   }
 
   if (!updated) throw new Error('Order not found');
@@ -705,40 +684,42 @@ export async function updateOrder(id: string, updates: Partial<Order>): Promise<
 }
 
 export async function updateOrderStatus(id: string, newStatus: Order['orderStatus']): Promise<Order> {
+  const orders = await getOrders();
+  const current = orders.find((order) => order.id === id);
+  if (!current) throw new Error(`Sales order not found: ${id}`);
+
+  let canEdit = true;
+  try {
+    await requirePermission('salesOrders', 'edit');
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('Permission denied:')) throw error;
+    canEdit = false;
+  }
+
+  if (!canEdit) {
+    await requirePermission('salesOrders', 'approve');
+    if (current.orderStatus !== 'pending' || newStatus !== 'confirmed') {
+      throw new Error('Approve permission only allows confirming a pending sales order.');
+    }
+    const updated = { ...current, orderStatus: newStatus };
+    if (shouldSyncToFirebase()) {
+      await persistCloudWrite(setDoc(doc(getDb(), 'orders', id), { orderStatus: newStatus }, { merge: true }), 'Approving sales order');
+    }
+    const localOrders = getLocalItem<Order[]>(STORAGE_KEYS.ORDERS, initialOrders);
+    setLocalItem(STORAGE_KEYS.ORDERS, localOrders.map((order) => order.id === id ? updated : order));
+    return updated;
+  }
+
   return updateOrder(id, { orderStatus: newStatus });
 }
 
 export async function uploadOrderSignedCopy(orderId: string, file: File): Promise<Order> {
+  await requirePermission('salesOrders', 'create');
   const orders = await getOrders();
   const target = orders.find((order) => order.id === orderId);
   if (!target) throw new Error('Sales order not found.');
 
-  if (!isLiveFirebaseConfigured || !storage) {
-    if (file.size > 5 * 1024 * 1024) {
-      throw new Error('Offline signed copies are limited to 5 MB. Configure Firebase Storage for larger files.');
-    }
-    const downloadUrl = await new Promise<string>((resolve, reject) => {
-      if (typeof FileReader === 'undefined') {
-        const base64Name = typeof btoa !== 'undefined' ? btoa(file.name || 'signed_copy') : 'c2lnbmVkX2NvcHk=';
-        resolve(`data:application/pdf;base64,${base64Name}`);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error('Could not read the signed copy for offline storage.'));
-      reader.readAsDataURL(file);
-    });
-    return updateOrder(orderId, {
-      signedCopy: {
-        downloadUrl,
-        storagePath: `local-orders/${orderId}/signed-copy/${Date.now()}_${file.name}`,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        uploadedAt: new Date().toISOString()
-      }
-    });
-  }
+  if (!isLiveFirebaseConfigured || !storage) throw new Error('Firebase Storage is required for signed order copies.');
 
   const storagePath = `orders/${orderId}/signed-copy/${Date.now()}_${file.name}`;
   const fileRef = ref(storage, storagePath);
@@ -768,14 +749,13 @@ export async function uploadOrderSignedCopy(orderId: string, file: File): Promis
 }
 
 export async function removeOrderSignedCopy(orderId: string): Promise<Order> {
+  await requireAnyPermission([['salesOrders', 'edit'], ['salesOrders', 'delete']]);
   const orders = await getOrders();
   const target = orders.find((order) => order.id === orderId);
   if (!target) throw new Error('Sales order not found.');
 
   if (target.signedCopy?.storagePath && storage) {
-    await deleteObject(ref(storage, target.signedCopy.storagePath)).catch((error) => {
-      console.warn('Could not delete signed copy from Firebase Storage:', error);
-    });
+    await withTimeout(deleteObject(ref(storage, target.signedCopy.storagePath)), 10000);
   }
 
   const { signedCopy: _removedSignedCopy, ...withoutSignedCopy } = target;
@@ -792,24 +772,14 @@ export async function removeOrderSignedCopy(orderId: string): Promise<Order> {
 
 // ================= DISPATCHES =================
 export async function getDispatches(): Promise<Dispatch[]> {
-  const localItems = getLocalItem<Dispatch[]>(STORAGE_KEYS.DISPATCHES, initialDispatches);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'dispatches')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Dispatch);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.DISPATCHES, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getDispatches failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requireAnyPermission([['dispatch', 'view'], ['salesOrders', 'view'], ['finance', 'view']]);
+  const items = await getCloudItems<Dispatch>('dispatches');
+  setLocalItem(STORAGE_KEYS.DISPATCHES, items);
+  return items;
 }
 
 export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' | 'createdAt'>): Promise<Dispatch> {
+  await requirePermission('dispatch', 'create');
   const orders = await getOrders();
   const targetOrder = orders.find((order) => order.id === data.orderId || order.orderNumber === data.orderNumber);
   if (!targetOrder) {
@@ -868,9 +838,7 @@ export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' |
   setLocalItem(STORAGE_KEYS.DISPATCHES, [newDispatch, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'dispatches', newDispatch.id), sanitizeForFirestore(newDispatch)), 2500).catch((e) =>
-      console.error('Error adding dispatch to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'dispatches', newDispatch.id), sanitizeForFirestore(newDispatch)), 'Adding dispatch');
   }
 
   // If status is 'dispatched' or 'delivered', automatically update inventory stock & order status
@@ -884,28 +852,29 @@ export async function addDispatch(data: Omit<Dispatch, 'id' | 'dispatchNumber' |
 export async function updateDispatchStatus(id: string, newStatus: Dispatch['status']): Promise<Dispatch> {
   const dispatches = await getDispatches();
   const dispatch = dispatches.find((d) => d.id === id);
-  const updatedDispatch: Dispatch = dispatch
-    ? { ...dispatch, status: newStatus }
-    : {
-        id,
-        dispatchNumber: id,
-        orderId: '',
-        orderNumber: '',
-        customerName: '',
-        items: [],
-        dispatchDate: new Date().toISOString().split('T')[0],
-        status: newStatus,
-        createdAt: new Date().toISOString().split('T')[0]
-      };
+  if (!dispatch) throw new Error(`Dispatch not found: ${id}`);
+
+  let canEdit = true;
+  try {
+    await requirePermission('dispatch', 'edit');
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('Permission denied:')) throw error;
+    canEdit = false;
+  }
+  if (!canEdit) {
+    await requirePermission('dispatch', 'approve');
+    if (dispatch.status !== 'pending' || newStatus !== 'ready') {
+      throw new Error('Approve permission only allows moving a pending dispatch to ready.');
+    }
+  }
+  const updatedDispatch: Dispatch = { ...dispatch, status: newStatus };
 
   const list = getLocalItem<Dispatch[]>(STORAGE_KEYS.DISPATCHES, initialDispatches);
   const newList = list.map((item) => (item.id === id ? updatedDispatch : item));
   setLocalItem(STORAGE_KEYS.DISPATCHES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'dispatches', id), sanitizeForFirestore(updatedDispatch), { merge: true }), 2500).catch((e) =>
-      console.error('Error updating dispatch in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'dispatches', id), sanitizeForFirestore(updatedDispatch), { merge: true }), 'Updating dispatch status');
   }
 
   if (newStatus === 'dispatched' || newStatus === 'delivered') {
@@ -951,9 +920,7 @@ async function processDispatchStockDeduction(dispatch: Dispatch): Promise<void> 
     setLocalItem(STORAGE_KEYS.DISPATCHES, newList);
 
     if (shouldSyncToFirebase()) {
-      withTimeout(setDoc(doc(getDb(), 'dispatches', dispatch.id), sanitizeForFirestore({ stockDeducted: true }), { merge: true }), 2500).catch((e) =>
-        console.error('Error updating stockDeducted flag in Firebase:', e)
-      );
+      await persistCloudWrite(setDoc(doc(getDb(), 'dispatches', dispatch.id), { stockDeducted: true }, { merge: true }), 'Saving dispatch stock status');
     }
   }
 
@@ -977,24 +944,14 @@ async function processDispatchStockDeduction(dispatch: Dispatch): Promise<void> 
 
 // ================= PAYMENTS =================
 export async function getPayments(): Promise<Payment[]> {
-  const localItems = getLocalItem<Payment[]>(STORAGE_KEYS.PAYMENTS, initialPayments);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'payments')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Payment);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.PAYMENTS, merged);
-        return dedupeById(merged);
-      }
-    } catch (e) {
-      console.warn('Firebase getPayments failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return dedupeById(localItems);
+  await requireAnyPermission([['finance', 'view'], ['dashboard', 'view']]);
+  const items = dedupeById(await getCloudItems<Payment>('payments'));
+  setLocalItem(STORAGE_KEYS.PAYMENTS, items);
+  return items;
 }
 
 export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): Promise<Payment> {
+  await requirePermission('finance', 'create');
   if (!Number.isFinite(data.amount) || data.amount <= 0) {
     throw new Error('Payment amount must be greater than zero.');
   }
@@ -1026,9 +983,7 @@ export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): P
   setLocalItem(STORAGE_KEYS.PAYMENTS, [newPayment, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'payments', newPayment.id), newPayment), 2500).catch((e) =>
-      console.error('Error adding payment to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'payments', newPayment.id), newPayment), 'Adding payment');
   }
 
   const newPaid = targetOrder.paidAmount + data.amount;
@@ -1043,7 +998,7 @@ export async function addPayment(data: Omit<Payment, 'id' | 'receiptNumber'>): P
 
 // ================= PAYMENT REMINDERS =================
 export async function getPaymentReminders(): Promise<PaymentReminder[]> {
-  const localItems = getLocalItem<PaymentReminder[]>(STORAGE_KEYS.PAYMENT_REMINDERS, []);
+  await requirePermission('finance', 'view');
   const dedupeByOrderId = (items: PaymentReminder[]) => {
     const seenOrders = new Set<string>();
     return items.filter((item) => {
@@ -1052,20 +1007,9 @@ export async function getPaymentReminders(): Promise<PaymentReminder[]> {
       return true;
     });
   };
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'paymentReminders')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as PaymentReminder);
-        const merged = dedupeByOrderId(dedupeById(mergeLocalAndRemote(localItems, remoteItems)));
-        setLocalItem(STORAGE_KEYS.PAYMENT_REMINDERS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getPaymentReminders failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return dedupeByOrderId(dedupeById(localItems));
+  const items = dedupeByOrderId(dedupeById(await getCloudItems<PaymentReminder>('paymentReminders')));
+  setLocalItem(STORAGE_KEYS.PAYMENT_REMINDERS, items);
+  return items;
 }
 
 export async function savePaymentReminder(
@@ -1073,6 +1017,7 @@ export async function savePaymentReminder(
 ): Promise<PaymentReminder> {
   const now = new Date().toISOString();
   const existing = (await getPaymentReminders()).find((reminder) => reminder.orderId === data.orderId);
+  await requirePermission('finance', existing ? 'edit' : 'create');
   const reminder: PaymentReminder = {
     ...data,
     id: existing?.id || `REM-${data.orderId}`,
@@ -1084,36 +1029,21 @@ export async function savePaymentReminder(
   setLocalItem(STORAGE_KEYS.PAYMENT_REMINDERS, next);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'paymentReminders', reminder.id), sanitizeForFirestore(reminder)), 2500).catch((e) =>
-      console.error('Error saving payment reminder to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'paymentReminders', reminder.id), sanitizeForFirestore(reminder)), 'Saving payment reminder');
   }
   return reminder;
 }
 
 // ================= EXPENSES =================
 export async function getExpenses(): Promise<Expense[]> {
-  const localItems = getLocalItem<Expense[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
-  let items: Expense[] = localItems;
-
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'expenses')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as Expense);
-        items = mergeLocalAndRemote(localItems, remoteItems);
-      }
-    } catch (e) {
-      console.warn('Firebase getExpenses failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-
-  items = dedupeById(items);
+  await requirePermission('finance', 'view');
+  const items = dedupeById(await getCloudItems<Expense>('expenses'));
   setLocalItem(STORAGE_KEYS.EXPENSES, items);
   return items;
 }
 
 export async function addExpense(data: Omit<Expense, 'id'>): Promise<Expense> {
+  await requirePermission('finance', 'create');
   const id = `EXP-${Math.floor(300 + Math.random() * 700)}`;
   const newExpense: Expense = { ...data, id };
 
@@ -1122,46 +1052,44 @@ export async function addExpense(data: Omit<Expense, 'id'>): Promise<Expense> {
   setLocalItem(STORAGE_KEYS.EXPENSES, updatedList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'expenses', id), newExpense), 2500).catch((e) =>
-      console.error('Error adding expense to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'expenses', id), newExpense), 'Adding expense');
   }
 
   return newExpense;
 }
 
 export async function deleteExpense(id: string): Promise<void> {
+  await requirePermission('finance', 'delete');
   const list = getLocalItem<Expense[]>(STORAGE_KEYS.EXPENSES, initialExpenses);
   const newList = list.filter((item) => item.id !== id);
   setLocalItem(STORAGE_KEYS.EXPENSES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'expenses', id)), 2500).catch((e) =>
-      console.error('Error deleting expense in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'expenses', id)), 'Deleting expense');
   }
 }
 
 // ================= RAW MATERIALS & USAGE =================
 export async function getRawMaterials(): Promise<RawMaterial[]> {
-  const localItems = getLocalItem<RawMaterial[]>(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'rawMaterials')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as RawMaterial);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.RAW_MATERIALS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getRawMaterials failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requireAnyPermission([
+    ['rawMaterials', 'view'],
+    ['purchases', 'view'],
+    ['purchasedMaterials', 'view'],
+    ['finishedGoods', 'view'],
+    ['dashboard', 'view']
+  ]);
+  const items = await getCloudItems<RawMaterial>('rawMaterials');
+  setLocalItem(STORAGE_KEYS.RAW_MATERIALS, items);
+  return items;
 }
 
 export async function addRawMaterial(data: Omit<RawMaterial, 'id' | 'status' | 'lastRestocked'>): Promise<RawMaterial> {
+  await requireAnyPermission([
+    ['rawMaterials', 'create'],
+    ['purchases', 'create'],
+    ['purchases', 'edit'],
+    ['purchases', 'approve']
+  ]);
   const id = `RM-${Math.floor(100 + Math.random() * 900)}`;
   const status = data.currentStock <= data.minimumStock ? 'low_stock' : 'healthy';
   const newMaterial: RawMaterial = {
@@ -1181,15 +1109,27 @@ export async function addRawMaterial(data: Omit<RawMaterial, 'id' | 'status' | '
   setLocalItem(STORAGE_KEYS.RAW_MATERIALS, [newMaterial, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'rawMaterials', id), newMaterial), 2500).catch((e) =>
-      console.error('Error adding raw material to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'rawMaterials', id), newMaterial), 'Adding raw material');
   }
 
   return newMaterial;
 }
 
 export async function updateRawMaterial(id: string, updates: Partial<RawMaterial>): Promise<RawMaterial> {
+  const inventoryUpdateKeys = new Set(['currentStock', 'minimumStock', 'unitCost', 'supplier', 'lastRestocked', 'status']);
+  const updateKeys = Object.keys(updates);
+  if (updateKeys.length > 0 && updateKeys.every((key) => inventoryUpdateKeys.has(key))) {
+    await requireAnyPermission([
+      ['rawMaterials', 'edit'],
+      ['rawMaterials', 'create'],
+      ['purchases', 'edit'],
+      ['purchases', 'approve'],
+      ['finishedGoods', 'create'],
+      ['dispatch', 'create']
+    ]);
+  } else {
+    await requirePermission('rawMaterials', 'edit');
+  }
   let updated: RawMaterial | null = null;
   const list = getLocalItem<RawMaterial[]>(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
   let found = false;
@@ -1211,9 +1151,7 @@ export async function updateRawMaterial(id: string, updates: Partial<RawMaterial
   setLocalItem(STORAGE_KEYS.RAW_MATERIALS, newList);
 
   if (shouldSyncToFirebase() && updated) {
-    withTimeout(setDoc(doc(getDb(), 'rawMaterials', id), updated, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating raw material in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'rawMaterials', id), updated, { merge: true }), 'Updating raw material');
   }
 
   if (!updated) throw new Error('Raw material not found');
@@ -1221,35 +1159,24 @@ export async function updateRawMaterial(id: string, updates: Partial<RawMaterial
 }
 
 export async function deleteRawMaterial(id: string): Promise<void> {
+  await requirePermission('rawMaterials', 'delete');
   const list = getLocalItem<RawMaterial[]>(STORAGE_KEYS.RAW_MATERIALS, initialRawMaterials);
   setLocalItem(STORAGE_KEYS.RAW_MATERIALS, list.filter((item) => item.id !== id));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'rawMaterials', id)), 2500).catch((e) =>
-      console.error('Error deleting raw material in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'rawMaterials', id)), 'Deleting raw material');
   }
 }
 
 export async function getRawMaterialUsage(): Promise<RawMaterialUsage[]> {
-  const localItems = getLocalItem<RawMaterialUsage[]>(STORAGE_KEYS.RAW_MATERIAL_USAGE, initialRawMaterialUsage);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'rawMaterialUsage')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as RawMaterialUsage);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getRawMaterialUsage failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requireAnyPermission([['rawMaterials', 'view'], ['finishedGoods', 'view']]);
+  const items = await getCloudItems<RawMaterialUsage>('rawMaterialUsage');
+  setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, items);
+  return items;
 }
 
 export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>): Promise<RawMaterialUsage> {
+  await requireAnyPermission([['rawMaterials', 'create'], ['finishedGoods', 'create'], ['dispatch', 'create']]);
   const id = `RMU-${Math.floor(1000 + Math.random() * 9000)}`;
   
   // Get material to handle unit conversion
@@ -1286,9 +1213,7 @@ export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>)
   setLocalItem(STORAGE_KEYS.RAW_MATERIAL_USAGE, [newUsage, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'rawMaterialUsage', id), newUsage), 2500).catch((e) =>
-      console.error('Error adding raw material usage to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'rawMaterialUsage', id), newUsage), 'Recording raw material usage');
   }
 
   // Deduct stock from target raw material (always in base unit using total deduction)
@@ -1302,26 +1227,16 @@ export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>)
 
 // ================= PURCHASED MATERIALS =================
 export async function getPurchasedMaterials(): Promise<PurchasedMaterial[]> {
-  const localItems = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'purchasedMaterials')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as PurchasedMaterial);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getPurchasedMaterials failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requirePermission('purchasedMaterials', 'view');
+  const items = await getCloudItems<PurchasedMaterial>('purchasedMaterials');
+  setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, items);
+  return items;
 }
 
 export async function addPurchasedMaterial(
   data: Omit<PurchasedMaterial, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<PurchasedMaterial> {
+  await requirePermission('purchasedMaterials', 'create');
   const id = `PM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const now = new Date().toISOString();
   const newMaterial: PurchasedMaterial = { ...data, id, createdAt: now };
@@ -1329,9 +1244,7 @@ export async function addPurchasedMaterial(
   setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, [newMaterial, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), sanitizeForFirestore(newMaterial)), 2500).catch((e) =>
-      console.error('Error adding purchased material to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchasedMaterials', id), sanitizeForFirestore(newMaterial)), 'Adding purchased material');
   }
   return newMaterial;
 }
@@ -1340,6 +1253,7 @@ export async function updatePurchasedMaterial(
   id: string,
   updates: Partial<Omit<PurchasedMaterial, 'id' | 'createdAt'>>
 ): Promise<PurchasedMaterial> {
+  await requirePermission('purchasedMaterials', 'edit');
   const list = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
   const existing = list.find((item) => item.id === id);
   if (!existing) throw new Error('Purchased material not found');
@@ -1356,41 +1270,27 @@ export async function updatePurchasedMaterial(
       firebaseUpdates.packetQuantity = deleteField();
       firebaseUpdates.unitsPerPacket = deleteField();
     }
-    withTimeout(setDoc(doc(getDb(), 'purchasedMaterials', id), firebaseUpdates, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating purchased material in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchasedMaterials', id), firebaseUpdates, { merge: true }), 'Updating purchased material');
   }
   return updated;
 }
 
 export async function deletePurchasedMaterial(id: string): Promise<void> {
+  await requirePermission('purchasedMaterials', 'delete');
   const list = getLocalItem<PurchasedMaterial[]>(STORAGE_KEYS.PURCHASED_MATERIALS, []);
   setLocalItem(STORAGE_KEYS.PURCHASED_MATERIALS, list.filter((item) => item.id !== id));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'purchasedMaterials', id)), 2500).catch((e) =>
-      console.error('Error deleting purchased material in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'purchasedMaterials', id)), 'Deleting purchased material');
   }
 }
 
 // ================= PURCHASES =================
 export async function getPurchases(): Promise<PurchaseOrder[]> {
-  const localItems = getLocalItem<PurchaseOrder[]>(STORAGE_KEYS.PURCHASES, initialPurchases);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'purchases')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as PurchaseOrder);
-        const merged = mergePurchases(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.PURCHASES, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getPurchases failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return dedupeById(localItems);
+  await requireAnyPermission([['purchases', 'view'], ['finance', 'view']]);
+  const items = dedupeById(await getCloudItems<PurchaseOrder>('purchases'));
+  setLocalItem(STORAGE_KEYS.PURCHASES, items);
+  return items;
 }
 
 export async function addPurchase(
@@ -1401,6 +1301,7 @@ export async function addPurchase(
     paymentStatus?: PurchasePaymentStatus;
   }
 ): Promise<PurchaseOrder> {
+  await requirePermission('purchases', 'create');
   const randomNum = Math.floor(10000 + Math.random() * 90000);
   const purchaseNumber = purchaseData.purchaseNumber || `PO-${randomNum}`;
   const id = purchaseData.id || purchaseNumber;
@@ -1419,9 +1320,7 @@ export async function addPurchase(
   setLocalItem(STORAGE_KEYS.PURCHASES, [newPurchase, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchases', newPurchase.id), newPurchase), 2500).catch((e) =>
-      console.error('Error adding purchase to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchases', newPurchase.id), newPurchase), 'Adding purchase');
   }
 
   // Idempotent stock addition: if status is 'received' or 'completed', trigger stock increment once
@@ -1433,6 +1332,7 @@ export async function addPurchase(
 }
 
 export async function updatePurchase(id: string, updates: Partial<PurchaseOrder>): Promise<PurchaseOrder> {
+  await requirePermission('purchases', 'edit');
   const purchases = await getPurchases();
   const target = purchases.find((purchase) => purchase.id === id);
   if (!target) throw new Error(`Purchase order not found: ${id}`);
@@ -1463,9 +1363,7 @@ export async function updatePurchase(id: string, updates: Partial<PurchaseOrder>
   setLocalItem(STORAGE_KEYS.PURCHASES, list.map((purchase) => purchase.id === id ? updated : purchase));
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchases', id), updates, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating purchase in Firebase:', { purchaseId: id, error: e })
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchases', id), updates, { merge: true }), 'Updating purchase');
   }
   return updated;
 }
@@ -1475,6 +1373,19 @@ export async function updatePurchaseStatus(id: string, newStatus: PurchaseStatus
   const target = purchases.find((p) => p.id === id);
 
   if (!target) throw new Error('Purchase order not found');
+  let canEdit = true;
+  try {
+    await requirePermission('purchases', 'edit');
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('Permission denied:')) throw error;
+    canEdit = false;
+  }
+  if (!canEdit) {
+    await requirePermission('purchases', 'approve');
+    if (target.status !== 'pending' || newStatus !== 'received') {
+      throw new Error('Approve permission only allows receiving a pending purchase.');
+    }
+  }
 
   const updated: PurchaseOrder = { ...target, status: newStatus };
 
@@ -1483,9 +1394,7 @@ export async function updatePurchaseStatus(id: string, newStatus: PurchaseStatus
   setLocalItem(STORAGE_KEYS.PURCHASES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchases', id), { status: newStatus }, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating purchase status in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchases', id), { status: newStatus }, { merge: true }), 'Updating purchase status');
   }
 
   // If transition to received or completed, apply stock addition idempotently
@@ -1497,6 +1406,8 @@ export async function updatePurchaseStatus(id: string, newStatus: PurchaseStatus
 }
 
 export async function recordPurchasePayment(id: string, amount: number, paymentDate = new Date().toISOString().split('T')[0], notes = ''): Promise<PurchaseOrder> {
+  await requirePermission('finance', 'create');
+  await requirePermission('purchases', 'edit');
   const purchases = await getPurchases();
   const target = purchases.find((p) => p.id === id);
 
@@ -1532,20 +1443,21 @@ export async function recordPurchasePayment(id: string, amount: number, paymentD
   setLocalItem(STORAGE_KEYS.PURCHASES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(
+    await persistCloudWrite(
       setDoc(
         doc(getDb(), 'purchases', id),
         { paidAmount: newPaidAmount, paymentStatus: newPaymentStatus, paymentRecords: updated.paymentRecords },
         { merge: true }
       ),
-      2500
-    ).catch((e) => console.error('Error updating purchase payment in Firebase:', e));
+      'Recording purchase payment'
+    );
   }
 
   return updated;
 }
 
 export async function deletePurchase(id: string): Promise<void> {
+  await requirePermission('purchases', 'delete');
   const list = getLocalItem<PurchaseOrder[]>(STORAGE_KEYS.PURCHASES, initialPurchases);
   setLocalItem(
     STORAGE_KEYS.PURCHASES,
@@ -1553,9 +1465,7 @@ export async function deletePurchase(id: string): Promise<void> {
   );
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'purchases', id)), 2500).catch((e) =>
-      console.error('Error deleting purchase in Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'purchases', id)), 'Deleting purchase');
   }
 }
 
@@ -1618,9 +1528,7 @@ async function processPurchaseStockAddition(purchase: PurchaseOrder): Promise<Pu
   setLocalItem(STORAGE_KEYS.PURCHASES, newList);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'purchases', purchase.id), { stockAdded: true }, { merge: true }), 2500).catch((e) =>
-      console.error('Error updating stockAdded flag in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'purchases', purchase.id), { stockAdded: true }, { merge: true }), 'Saving purchase stock status');
   }
 
   return updatedPurchase;
@@ -1628,24 +1536,14 @@ async function processPurchaseStockAddition(purchase: PurchaseOrder): Promise<Pu
 
 // ================= FINISHED GOODS LOG =================
 export async function getFinishedGoodsLogs(): Promise<FinishedGoodsLog[]> {
-  const localItems = getLocalItem<FinishedGoodsLog[]>(STORAGE_KEYS.FINISHED_GOODS_LOGS, initialFinishedGoodsLogs);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'finishedGoodsLogs')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as FinishedGoodsLog);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getFinishedGoodsLogs failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requirePermission('finishedGoods', 'view');
+  const items = await getCloudItems<FinishedGoodsLog>('finishedGoodsLogs');
+  setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, items);
+  return items;
 }
 
 export async function addFinishedGoodsLog(data: Omit<FinishedGoodsLog, 'id'>): Promise<FinishedGoodsLog> {
+  await requirePermission('finishedGoods', 'create');
   const id = `FGL-${Math.floor(9000 + Math.random() * 1000)}`;
   const newLog: FinishedGoodsLog = {
     ...data,
@@ -1658,9 +1556,7 @@ export async function addFinishedGoodsLog(data: Omit<FinishedGoodsLog, 'id'>): P
   setLocalItem(STORAGE_KEYS.FINISHED_GOODS_LOGS, [newLog, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'finishedGoodsLogs', id), newLog), 2500).catch((e) =>
-      console.error('Error adding finished goods log to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'finishedGoodsLogs', id), newLog), 'Adding finished-goods log');
   }
 
   // Add produced quantity to target product stock
@@ -1677,41 +1573,22 @@ export async function addFinishedGoodsLog(data: Omit<FinishedGoodsLog, 'id'>): P
 
 // ================= DOCUMENTS & FIREBASE STORAGE =================
 export async function getDocuments(): Promise<DocumentItem[]> {
-  const localItems = getLocalItem<DocumentItem[]>(STORAGE_KEYS.DOCUMENTS, initialDocuments);
-  if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDocs(collection(getDb(), 'documents')), 2000);
-      if (snap && snap.docs.length > 0) {
-        const remoteItems = snap.docs.map((d) => d.data() as DocumentItem);
-        const merged = mergeLocalAndRemote(localItems, remoteItems);
-        setLocalItem(STORAGE_KEYS.DOCUMENTS, merged);
-        return merged;
-      }
-    } catch (e) {
-      console.warn('Firebase getDocuments failed or timed out, falling back to LocalStorage:', e);
-    }
-  }
-  return localItems;
+  await requirePermission('documents', 'view');
+  const items = await getCloudItems<DocumentItem>('documents');
+  setLocalItem(STORAGE_KEYS.DOCUMENTS, items);
+  return items;
 }
 
 export async function uploadDocument(file: File, category: DocumentItem['category']): Promise<DocumentItem> {
-  const id = `DOC-${Math.floor(100 + Math.random() * 900)}`;
-  let downloadUrl = '#';
-  let storagePath = '';
-
-  if (isLiveFirebaseConfigured && storage) {
-    try {
-      storagePath = `documents/${Date.now()}_${file.name}`;
-      const fileRef = ref(storage, storagePath);
-      await withTimeout(uploadBytes(fileRef, file), 3000);
-      downloadUrl = await withTimeout(getDownloadURL(fileRef), 2000);
-    } catch (e) {
-      console.error('Error uploading file to Firebase Storage:', e);
-      downloadUrl = URL.createObjectURL(file);
-    }
-  } else {
-    downloadUrl = URL.createObjectURL(file);
+  await requirePermission('documents', 'create');
+  if (!isLiveFirebaseConfigured || !storage) {
+    throw new Error('Firebase Storage is required to upload company documents.');
   }
+  const id = `DOC-${Math.floor(100 + Math.random() * 900)}`;
+  const storagePath = `documents/${Date.now()}_${file.name}`;
+  const fileRef = ref(storage, storagePath);
+  await withTimeout(uploadBytes(fileRef, file), 30000);
+  const downloadUrl = await withTimeout(getDownloadURL(fileRef), 10000);
 
   const newDoc: DocumentItem = {
     id,
@@ -1728,28 +1605,20 @@ export async function uploadDocument(file: File, category: DocumentItem['categor
   setLocalItem(STORAGE_KEYS.DOCUMENTS, [newDoc, ...list]);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'documents', id), newDoc), 2500).catch((e) =>
-      console.error('Error adding document doc to Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'documents', id), newDoc), 'Saving document record');
   }
 
   return newDoc;
 }
 
 export async function deleteDocument(id: string, storagePath?: string): Promise<void> {
+  await requirePermission('documents', 'delete');
   if (isLiveFirebaseConfigured && storage && storagePath) {
-    try {
-      const fileRef = ref(storage, storagePath);
-      await withTimeout(deleteObject(fileRef), 2500);
-    } catch (e) {
-      console.warn('Could not delete file from Firebase Storage:', e);
-    }
+    await withTimeout(deleteObject(ref(storage, storagePath)), 10000);
   }
 
   if (shouldSyncToFirebase()) {
-    withTimeout(deleteDoc(doc(getDb(), 'documents', id)), 2500).catch((e) =>
-      console.error('Error deleting document from Firebase:', e)
-    );
+    await persistCloudWrite(deleteDoc(doc(getDb(), 'documents', id)), 'Deleting document record');
   }
 
   const list = getLocalItem<DocumentItem[]>(STORAGE_KEYS.DOCUMENTS, initialDocuments);
@@ -1758,32 +1627,31 @@ export async function deleteDocument(id: string, storagePath?: string): Promise<
 
 // ================= SETTINGS =================
 export async function getSettings(): Promise<Settings> {
+  if (!auth?.currentUser) throw new Error('You must sign in to view company settings.');
   if (isLiveFirebaseConfigured && db) {
-    try {
-      const snap = await withTimeout(getDoc(doc(getDb(), 'settings', 'company_settings')), 2000);
-      if (snap && snap.exists()) return snap.data() as Settings;
-    } catch (e) {
-      console.warn('Firebase getSettings failed or timed out, falling back to LocalStorage:', e);
-    }
+    const snap = await withTimeout(getDoc(doc(getDb(), 'settings', 'company_settings')), 10000);
+    return snap.exists() ? snap.data() as Settings : initialSettings;
   }
-  return getLocalItem<Settings>(STORAGE_KEYS.SETTINGS, initialSettings);
+  throw new Error('Company settings are unavailable without Firebase.');
 }
 
 export async function updateSettings(updates: Partial<Settings>): Promise<Settings> {
-  const current = getLocalItem<Settings>(STORAGE_KEYS.SETTINGS, initialSettings);
+  if (!auth?.currentUser || (await auth.currentUser.getIdTokenResult()).claims.admin !== true) {
+    throw new Error('Administrator permission is required to update company settings.');
+  }
+  const current = await getSettings();
   const newSettings = { ...current, ...updates };
   setLocalItem(STORAGE_KEYS.SETTINGS, newSettings);
 
   if (shouldSyncToFirebase()) {
-    withTimeout(setDoc(doc(getDb(), 'settings', 'company_settings'), newSettings), 2500).catch((e) =>
-      console.error('Error updating settings in Firebase:', e)
-    );
+    await persistCloudWrite(setDoc(doc(getDb(), 'settings', 'company_settings'), newSettings), 'Updating company settings');
   }
   return newSettings;
 }
 
 // ================= DASHBOARD & ANALYTICS METRICS =================
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+  await requirePermission('dashboard', 'view');
   const orders = await getOrders();
   const products = await getProducts();
   const payments = await getPayments();

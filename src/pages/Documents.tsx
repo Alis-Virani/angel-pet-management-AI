@@ -9,6 +9,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { useTranslation } from '../i18n';
+import { useAuth } from '../auth/AuthContext';
 
 interface DocumentsProps {
   onOpenUploadDocumentModal: () => void;
@@ -18,6 +19,7 @@ export const Documents: React.FC<DocumentsProps> = ({
   onOpenUploadDocumentModal,
 }) => {
   const { t } = useTranslation();
+  const { can } = useAuth();
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,14 +100,14 @@ export const Documents: React.FC<DocumentsProps> = ({
           </p>
         </div>
 
-        <button
+        {can('documents', 'create') && <button
           type="button"
           onClick={onOpenUploadDocumentModal}
           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-colors flex items-center gap-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>{t('Upload Document')}</span>
-        </button>
+        </button>}
       </div>
 
       {/* Filters */}
@@ -246,7 +248,7 @@ export const Documents: React.FC<DocumentsProps> = ({
                     )}
 
                     {/* Delete */}
-                    <button
+                    {can('documents', 'delete') && <button
                       type="button"
                       onClick={() =>
                         handleDeleteDoc(
@@ -258,7 +260,7 @@ export const Documents: React.FC<DocumentsProps> = ({
                       title="Delete File"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </button>}
 
                   </div>
                 </div>

@@ -3,13 +3,32 @@ import { Link, useParams } from 'react-router-dom';
 import { PurchaseOrder, Supplier } from '../types';
 import { getPurchases, getSuppliers } from '../services/db';
 import { ArrowLeft, Building, Calendar, IndianRupee, Phone, Truck } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 
 export const SupplierProfile: React.FC = () => {
+  const { can } = useAuth();
   const { supplierId } = useParams<{ supplierId: string }>();
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [purchases, setPurchases] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { Promise.all([getSuppliers(), getPurchases()]).then(([suppliers, purchaseList]) => { const found = suppliers.find((item) => item.id === supplierId); setSupplier(found || null); setPurchases(found ? purchaseList.filter((item) => item.supplierName.toLowerCase() === found.company.toLowerCase()) : []); }).catch((error) => console.error('Error loading supplier profile:', error)).finally(() => setLoading(false)); }, [supplierId]);
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const supplierList = await getSuppliers();
+        const found = supplierList.find((item) => item.id === supplierId);
+        setSupplier(found || null);
+        if (found && can('purchases', 'view')) {
+          const purchaseList = await getPurchases();
+          setPurchases(purchaseList.filter((item) => item.supplierName.toLowerCase() === found.company.toLowerCase()));
+        }
+      } catch (error) {
+        console.error('Error loading supplier profile:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadProfile();
+  }, [supplierId, can]);
   if (loading) return <div className="p-8 text-center text-xs text-slate-400">Loading supplier profile...</div>;
   if (!supplier) return <div className="p-8 text-center space-y-3"><p className="text-sm font-semibold">Supplier not found.</p><Link to="/suppliers" className="text-xs text-blue-600">Back to Supplier Directory</Link></div>;
   return <div className="space-y-6">
