@@ -300,13 +300,13 @@ export interface RawMaterialUsage {
   materialName: string;
   quantity: number;
   unit: string;
-  baseQuantity?: number; // converted to base unit
+  baseQuantity?: number; // net consumed quantity converted to base unit
   baseTotalDeduction?: number; // total consumption including wastage, converted to base unit
   baseUnit?: string;
-  equivalentPieces?: number; // equivalent pieces if conversion exists
+  equivalentPieces?: number; // equivalent pieces calculated from net consumption
   wastage1?: number; // first wastage amount
   wastage2?: number; // second wastage amount
-  totalDeduction?: number; // total amount deducted from stock
+  totalDeduction?: number; // total amount deducted from stock, including wastage
   date: string;
   productionBatch?: string;
   notes?: string;

@@ -1186,14 +1186,16 @@ export async function recordRawMaterialUsage(data: Omit<RawMaterialUsage, 'id'>)
     throw new Error('Raw material not found.');
   }
   
-  // Calculate total deduction for stock (consumed + wastage1 + wastage2)
+  // Stock deduction is the net consumption plus recorded wastage.
   const totalDeductionInput = data.totalDeduction || data.quantity;
   const baseQuantity = toBaseQuantity(data.quantity, data.unit, material);
   const baseTotalDeduction = toBaseQuantity(totalDeductionInput, data.unit, material);
   const baseUnit = material.baseUnit || material.unit;
-  const equivalentPieces = material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0
-    ? baseTotalDeduction * material.piecesPerBaseUnit
-    : undefined;
+  const equivalentPieces = data.equivalentPieces ?? (
+    material.piecesPerBaseUnit && material.piecesPerBaseUnit > 0
+      ? baseQuantity * material.piecesPerBaseUnit
+      : undefined
+  );
 
   if (baseTotalDeduction > material.currentStock) {
     throw new Error(`Insufficient stock. Available: ${material.currentStock} ${baseUnit}.`);

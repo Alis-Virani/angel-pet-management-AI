@@ -11,6 +11,7 @@ import {
   calculateEquivalentPieces,
   calculatePiecesFromWeight,
   formatQuantityWithUnit,
+  fromBaseQuantity,
   getStockInBothUnits,
   toBaseQuantity
 } from '../../utils/unitConversion';
@@ -121,17 +122,42 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
     weightPerPieceGrams: Number(weightPerPieceGrams) || undefined
   });
   const totalWeightKg = weightCalculation.totalWeightKg || 0;
-  const materialQuantityNumber = totalWeightKg;
+  const totalMaterialQuantityKg = totalWeightKg;
   const wastage1Number = Number(wastage1) || 0;
   const wastage2Number = Number(wastage2) || 0;
-  const totalMaterialQuantity = materialQuantityNumber + wastage1Number + wastage2Number;
-  const convertedMaterialQuantity = selectedMaterial && totalMaterialQuantity > 0
-    ? toBaseQuantity(totalMaterialQuantity, materialUnit, selectedMaterial)
+  const netMaterialQuantityKg = totalMaterialQuantityKg - wastage1Number - wastage2Number;
+  const toMaterialBaseQuantity = (quantityKg: number) => {
+    if (!selectedMaterial) return 0;
+    const baseUnit = (selectedMaterial.baseUnit || selectedMaterial.unit).toLowerCase();
+    if (baseUnit === 'kg') return quantityKg;
+    if (baseUnit === 'g') return quantityKg * 1000;
+    if (baseUnit === 'pcs' && Number(weightPerPieceGrams) > 0) {
+      return quantityKg * 1000 / Number(weightPerPieceGrams);
+    }
+    return toBaseQuantity(quantityKg, 'kg', selectedMaterial);
+  };
+  const totalMaterialBaseQuantity = selectedMaterial && totalMaterialQuantityKg > 0
+    ? toMaterialBaseQuantity(totalMaterialQuantityKg)
     : 0;
-  const equivalentPieces = selectedMaterial
-    ? weightCalculation.isValid && weightCalculation.pieces !== null
-      ? (convertedMaterialQuantity / (totalWeightKg || 1)) * weightCalculation.pieces
-      : calculateEquivalentPieces(convertedMaterialQuantity, selectedMaterial)
+  const netMaterialBaseQuantity = selectedMaterial && netMaterialQuantityKg > 0
+    ? toMaterialBaseQuantity(netMaterialQuantityKg)
+    : 0;
+  const totalMaterialQuantity = selectedMaterial
+    ? fromBaseQuantity(totalMaterialBaseQuantity, materialUnit, selectedMaterial)
+    : 0;
+  const netMaterialQuantity = selectedMaterial
+    ? fromBaseQuantity(netMaterialBaseQuantity, materialUnit, selectedMaterial)
+    : 0;
+  const wastage1Quantity = selectedMaterial
+    ? fromBaseQuantity(toMaterialBaseQuantity(wastage1Number), materialUnit, selectedMaterial)
+    : 0;
+  const wastage2Quantity = selectedMaterial
+    ? fromBaseQuantity(toMaterialBaseQuantity(wastage2Number), materialUnit, selectedMaterial)
+    : 0;
+  const equivalentPieces = selectedMaterial && netMaterialQuantityKg > 0
+    ? weightCalculation.isValid && weightCalculation.pieces !== null && totalWeightKg > 0
+      ? weightCalculation.pieces * (netMaterialQuantityKg / totalWeightKg)
+      : calculateEquivalentPieces(netMaterialBaseQuantity, selectedMaterial)
     : undefined;
 
   const getMaterialUnits = (material: RawMaterial) =>
@@ -157,7 +183,7 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       setError('Please select the raw material used for this production.');
       return;
     }
-    if (!Number.isFinite(materialQuantityNumber) || materialQuantityNumber <= 0) {
+    if (!Number.isFinite(totalMaterialQuantityKg) || totalMaterialQuantityKg <= 0) {
       setError('Raw-material quantity must be greater than 0.');
       return;
     }
@@ -165,7 +191,11 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       setError('Wastage values cannot be negative.');
       return;
     }
-    if (convertedMaterialQuantity > selectedMaterial.currentStock) {
+    if (netMaterialQuantityKg <= 0) {
+      setError('Total wastage must be less than the total raw-material quantity.');
+      return;
+    }
+    if (totalMaterialBaseQuantity > selectedMaterial.currentStock) {
       setError(`Insufficient stock. Available: ${formatQuantityWithUnit(materialStock?.baseQuantity, materialStock?.baseUnit)}.`);
       return;
     }
@@ -177,10 +207,11 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
       await recordRawMaterialUsage({
         materialId: selectedMaterial.id,
         materialName: selectedMaterial.name,
-        quantity: materialQuantityNumber,
+        quantity: netMaterialQuantity,
         unit: materialUnit,
-        wastage1: wastage1Number || undefined,
-        wastage2: wastage2Number || undefined,
+        wastage1: wastage1Quantity || undefined,
+        wastage2: wastage2Quantity || undefined,
+        equivalentPieces: equivalentPieces || undefined,
         totalDeduction: totalMaterialQuantity,
         date: productionDate,
         productionBatch: batch,
@@ -316,27 +347,32 @@ export const AddFinishedGoodsModal: React.FC<AddFinishedGoodsModalProps> = ({
         {weightCalculation.isValid && weightCalculation.totalWeightKg !== null && (
           <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-900 flex flex-wrap gap-4">
             <span>Total weight: <strong>{weightCalculation.totalWeightKg.toLocaleString('en-IN', { maximumFractionDigits: 2 })} kg</strong></span>
-            <span>Calculation: <strong>{(weightCalculation.totalWeightKg * 1000).toLocaleString('en-IN')} g ÷ {Number(weightPerPieceGrams).toLocaleString('en-IN')} g</strong></span>
-            {weightCalculation.pieces !== null && (
-              <span>Equivalent pieces: <strong>{weightCalculation.pieces.toLocaleString('en-IN', { maximumFractionDigits: 2 })} pcs</strong></span>
+            <span>Net calculation: <strong>{(netMaterialQuantityKg * 1000).toLocaleString('en-IN')} g ÷ {Number(weightPerPieceGrams).toLocaleString('en-IN')} g</strong></span>
+            {equivalentPieces !== undefined && equivalentPieces > 0 && (
+              <span>Equivalent pieces: <strong>{equivalentPieces.toLocaleString('en-IN', { maximumFractionDigits: 2 })} pcs</strong></span>
             )}
           </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="form-label">Wastage 1 (Optional)</label>
+            <label className="form-label">Wastage 1 (kg, Optional)</label>
             <input type="number" min={0} step="0.01" value={wastage1} onChange={(e) => setWastage1(e.target.value)} className="form-input" />
           </div>
           <div>
-            <label className="form-label">Wastage 2 (Optional)</label>
+            <label className="form-label">Wastage 2 (kg, Optional)</label>
             <input type="number" min={0} step="0.01" value={wastage2} onChange={(e) => setWastage2(e.target.value)} className="form-input" />
           </div>
         </div>
 
-        {selectedMaterial && totalMaterialQuantity > 0 && (
+        {selectedMaterial && totalMaterialQuantityKg > 0 && (
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 flex flex-wrap gap-4">
-            <span>Total deduction: <strong>{formatQuantityWithUnit(convertedMaterialQuantity, selectedMaterial.baseUnit)}</strong></span>
+            <span>
+              Net quantity calculation: <strong>
+                {formatQuantityWithUnit(totalMaterialQuantityKg, 'kg')} - {formatQuantityWithUnit(wastage1Number, 'kg')} - {formatQuantityWithUnit(wastage2Number, 'kg')} = {formatQuantityWithUnit(netMaterialQuantityKg, 'kg')}
+              </strong>
+            </span>
+            <span>Stock deduction: <strong>{formatQuantityWithUnit(totalMaterialBaseQuantity, selectedMaterial.baseUnit)}</strong></span>
             {equivalentPieces !== undefined && equivalentPieces > 0 && (
               <span>Equivalent pieces: <strong>{formatQuantityWithUnit(equivalentPieces, 'pcs')}</strong></span>
             )}
